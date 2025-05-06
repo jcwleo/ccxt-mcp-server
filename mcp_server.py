@@ -16,9 +16,24 @@ async def get_exchange_instance(
     exchange_config_options: Optional[Dict] = None # Added to handle options like defaultType
 ) -> ccxtasync.Exchange:
     """
-    CCXT 거래소 인스턴스를 가져오거나 생성합니다 (캐싱 포함 - 현재 구현에는 캐싱 로직 없음)
-    API 키 정보가 제공되면 인증된 인스턴스를 생성/반환합니다
-    키 정보가 없으면 인증되지 않은 인스턴스를 반환합니다 (공용 API 호출용)
+    Asynchronously retrieves or creates a CCXT exchange instance.
+    (Note: Caching of instances is not currently implemented in this helper).
+
+    If api_key_info is provided, an authenticated instance is created/returned.
+    Otherwise, an unauthenticated instance is returned (suitable for public API calls).
+
+    Args:
+        exchange_id: The lowercase string ID of the exchange (e.g., 'binance', 'kucoin').
+        api_key_info: Optional dictionary containing API credentials.
+                      Expected keys: 'apiKey', 'secret', and optionally 'password' (for passphrase).
+        exchange_config_options: Optional dictionary for additional CCXT client configurations,
+                                 such as {'defaultType': 'future'} or other exchange-specific options.
+
+    Returns:
+        An initialized asynchronous CCXT exchange instance.
+
+    Raises:
+        ccxtasync.ExchangeNotFound: If the exchange_id is not found in the ccxtasync library.
     """
     exchange_id_lower = exchange_id.lower()
     try:
