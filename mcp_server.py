@@ -56,19 +56,26 @@ async def get_exchange_instance(
 
 # --- MCP Tools for CCXT Functions (Async) ---
 
+# Note: All tools now accept optional api_key, secret_key, and passphrase.
+# However, tools performing private actions (e.g., fetching balance, creating orders)
+# will return an error internally if these are not provided.
+
 @mcp.tool(
     name="fetch_account_balance",
-    description="Fetches the current balance of an account from a specified cryptocurrency exchange. Requires API authentication.",
+    description="Fetches the current balance of an account from a specified cryptocurrency exchange. Requires API authentication (api_key, secret_key).",
     tags={"account", "balance", "private", "spot", "margin", "futures"}
 )
 async def fetch_balance_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'upbit').")],
-    api_key: Annotated[str, Field(description="Your API key for the exchange.")],
-    secret_key: Annotated[str, Field(description="Your secret key for the exchange.")],
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase (e.g., for KuCoin, OKX).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include 'options' for CCXT client config.")] = None
 ) -> Dict:
     """Internal use: Fetches account balance. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for fetch_account_balance."}
+    
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -92,18 +99,21 @@ async def fetch_balance_tool(
 
 @mcp.tool(
     name="fetch_deposit_address",
-    description="Fetches the deposit address for a specific cryptocurrency on a given exchange. Requires API authentication.",
+    description="Fetches the deposit address for a specific cryptocurrency on a given exchange. Requires API authentication (api_key, secret_key).",
     tags={"account", "deposit", "address", "private"}
 )
 async def fetch_deposit_address_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="Your API key for the exchange.")],
-    secret_key: Annotated[str, Field(description="Your secret key for the exchange.")],
     code: Annotated[str, Field(description="Currency code (e.g., 'BTC', 'ETH').")],
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include 'options' for CCXT client config.")] = None
 ) -> Dict:
     """Internal use: Fetches deposit address. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for fetch_deposit_address."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -127,21 +137,24 @@ async def fetch_deposit_address_tool(
 
 @mcp.tool(
     name="withdraw_cryptocurrency",
-    description="Withdraws a specified amount of cryptocurrency to a given address. Requires API authentication and withdrawal permissions.",
+    description="Withdraws a specified amount of cryptocurrency to a given address. Requires API authentication (api_key, secret_key) and withdrawal permissions.",
     tags={"account", "withdrawal", "transaction", "private"}
 )
 async def withdraw_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="API key with withdrawal permissions.")],
-    secret_key: Annotated[str, Field(description="Secret key for the API.")],
     code: Annotated[str, Field(description="Currency code for withdrawal (e.g., 'BTC', 'ETH').")],
     amount: Annotated[float, Field(description="Amount of currency to withdraw.", gt=0)],
     address: Annotated[str, Field(description="Destination address for the withdrawal.")],
+    api_key: Annotated[Optional[str], Field(description="API key with withdrawal permissions. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Secret key for the API. Required for this operation.")] = None,
     tag: Annotated[Optional[str], Field(description="Optional: Destination tag/memo for certain currencies (e.g., XRP, XLM).")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include 'options' for CCXT client config.")] = None
 ) -> Dict:
     """Internal use: Withdraws cryptocurrency. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for withdraw_cryptocurrency."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -166,17 +179,20 @@ async def withdraw_tool(
 
 @mcp.tool(
     name="fetch_open_positions",
-    description="Fetches open positions for futures or derivatives trading from an exchange. Requires API authentication.",
+    description="Fetches open positions for futures or derivatives trading from an exchange. Requires API authentication (api_key, secret_key).",
     tags={"account", "positions", "futures", "derivatives", "private"}
 )
 async def fetch_positions_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (must support futures).")],
-    api_key: Annotated[str, Field(description="Your API key for the exchange.")],
-    secret_key: Annotated[str, Field(description="Your secret key for the exchange.")],
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Crucial for specifying market type (e.g., {'options': {'defaultType': 'future'}}) for client instantiation.")] = None
 ) -> Union[List[Dict], Dict]:
     """Internal use: Fetches open positions. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for fetch_open_positions."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -201,19 +217,22 @@ async def fetch_positions_tool(
 
 @mcp.tool(
     name="set_trading_leverage",
-    description="Sets the leverage for a specific trading symbol (usually for futures markets). Requires API authentication.",
+    description="Sets the leverage for a specific trading symbol (usually for futures markets). Requires API authentication (api_key, secret_key).",
     tags={"trading", "leverage", "futures", "private"}
 )
 async def set_leverage_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="Your API key for the exchange.")],
-    secret_key: Annotated[str, Field(description="Your secret key for the exchange.")],
     leverage: Annotated[int, Field(description="The desired leverage (e.g., 10 for 10x).", gt=0)],
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional/Required: The symbol (e.g., 'BTC/USDT') to set leverage for. Check exchange documentation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Crucial for market type (e.g., {'options': {'defaultType': 'future'}}) for client instantiation and for exchange-specific calls.")] = None
 ) -> Dict:
     """Internal use: Sets trading leverage. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for set_trading_leverage."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -239,8 +258,8 @@ async def set_leverage_tool(
 
 @mcp.tool(
     name="fetch_ohlcv",
-    description="Fetches historical Open-High-Low-Close-Volume (OHLCV) candlestick data for a symbol. Typically a public endpoint.",
-    tags={"market_data", "ohlcv", "candlestick", "historical_data", "public"}
+    description="Fetches historical Open-High-Low-Close-Volume (OHLCV) candlestick data for a symbol. Authentication is optional.",
+    tags={"market_data", "ohlcv", "candlestick", "historical_data", "public", "private"}
 )
 async def fetch_ohlcv_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
@@ -248,18 +267,26 @@ async def fetch_ohlcv_tool(
     timeframe: Annotated[str, Field(description="The length of time each candle represents (e.g., '1m', '5m', '1h', '1d').")],
     since: Annotated[Optional[int], Field(description="Optional: The earliest time in milliseconds (UTC) to fetch OHLCV data from (e.g., 1502962800000).", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: The maximum number of OHLCV candles to return.", gt=0)] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include {'options': ...} for client instantiation or {'price': 'mark'/'index'} for specific OHLCV types.")] = None
 ) -> Union[List[List[Union[int, float]]], Dict]:
     """Internal use: Fetches OHLCV data. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['fetchOHLCV']:
             return {"error": f"Exchange '{exchange_id}' does not support fetchOHLCV."}
         
-        # The 'price' parameter for mark/index price OHLCV is passed within the 'params' argument to fetchOHLCV itself.
         ohlcv_data = await exchange.fetchOHLCV(symbol, timeframe, since, limit, params=tool_params)
         return ohlcv_data
     except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
@@ -272,20 +299,29 @@ async def fetch_ohlcv_tool(
 
 @mcp.tool(
     name="fetch_funding_rate",
-    description="Fetches the current funding rate for a perpetual futures contract symbol. Typically a public endpoint.",
-    tags={"market_data", "funding_rate", "futures", "public"}
+    description="Fetches the current funding rate for a perpetual futures contract symbol. Authentication is optional.",
+    tags={"market_data", "funding_rate", "futures", "public", "private"}
 )
 async def fetch_funding_rate_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
     symbol: Annotated[str, Field(description="The symbol to fetch the funding rate for (e.g., 'BTC/USDT:USDT').")],
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Market type might be needed via {'options': {'defaultType': 'future'}} for client instantiation.")] = None
 ) -> Dict:
     """Internal use: Fetches funding rate. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['fetchFundingRate']:
             if exchange.has['fetchFundingRates']:
                  return {"error": f"Exchange '{exchange_id}' supports fetchFundingRates (plural). Try that or check symbol format if fetchFundingRate (singular) is not supported."}
@@ -303,22 +339,31 @@ async def fetch_funding_rate_tool(
 
 @mcp.tool(
     name="fetch_long_short_ratio",
-    description="Fetches the long/short ratio for a symbol, often for futures markets, by calling specific exchange API methods. Typically a public endpoint.",
-    tags={"market_data", "sentiment", "long_short_ratio", "futures", "public"}
+    description="Fetches the long/short ratio for a symbol by calling specific exchange methods. Authentication is optional.",
+    tags={"market_data", "sentiment", "long_short_ratio", "futures", "public", "private"}
 )
 async def fetch_long_short_ratio_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
     symbol: Annotated[str, Field(description="Symbol (e.g., 'BTC/USDT').")],
     timeframe: Annotated[str, Field(description="Timeframe (e.g., '5m', '1h').")],
     limit: Annotated[Optional[int], Field(description="Optional: Number of data points.", gt=0)] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Crucial. Use 'method_name' for the CCXT implicit method and 'method_params' for its arguments. Can also include {'options': {'defaultType': 'future'}} for client instantiation.")] = None
 ) -> Dict:
     """Internal use: Fetches long/short ratio. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         
         method_name = tool_params.pop('method_name', None)
         method_args_from_params = tool_params.pop('method_params', {})
@@ -347,20 +392,29 @@ async def fetch_long_short_ratio_tool(
 
 @mcp.tool(
     name="fetch_option_contract_data",
-    description="Fetches market data for a specific options contract, usually by using the exchange's ticker functionality. Typically a public endpoint.",
-    tags={"market_data", "options", "ticker", "public"}
+    description="Fetches market data for an options contract, usually via fetchTicker. Authentication is optional.",
+    tags={"market_data", "options", "ticker", "public", "private"}
 )
 async def fetch_option_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'deribit').")],
     symbol: Annotated[str, Field(description="The specific option symbol (e.g., 'BTC-28JUN24-70000-C').")],
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Market type via {'options': {'defaultType': 'option'}} might be needed for client instantiation.")] = None
 ) -> Dict:
     """Internal use: Fetches option contract data. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
 
         if exchange.has['fetchTicker']:
             option_data = await exchange.fetchTicker(symbol, params=tool_params)
@@ -377,20 +431,29 @@ async def fetch_option_tool(
 
 @mcp.tool(
     name="fetch_market_ticker",
-    description="Fetches the latest price ticker data (bid, ask, last price, volume, etc.) for a trading symbol. Typically a public endpoint.",
-    tags={"market_data", "ticker", "price", "public"}
+    description="Fetches the current ticker data for a symbol. Authentication is optional.",
+    tags={"market_data", "ticker", "price", "public", "private"}
 )
 async def fetch_ticker_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
     symbol: Annotated[str, Field(description="The symbol to fetch ticker for (e.g., 'BTC/USDT').")],
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include {'options': ...} for client instantiation.")] = None
 ) -> Dict:
     """Internal use: Fetches market ticker. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['fetchTicker']:
             return {"error": f"Exchange '{exchange_id}' does not support fetchTicker."}
         ticker = await exchange.fetchTicker(symbol, params=tool_params)
@@ -405,22 +468,31 @@ async def fetch_ticker_tool(
 
 @mcp.tool(
     name="fetch_public_market_trades",
-    description="Fetches recent publicly executed trades for a specific trading symbol. Typically a public endpoint.",
-    tags={"market_data", "trades", "history", "public"}
+    description="Fetches recent public trades for a symbol. Authentication is optional.",
+    tags={"market_data", "trades", "history", "public", "private"}
 )
 async def fetch_trades_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
     symbol: Annotated[str, Field(description="The symbol to fetch trades for.")],
     since: Annotated[Optional[int], Field(description="Optional: Timestamp (milliseconds, UTC) to fetch trades since.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of trades to fetch.", gt=0)] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the exchange API. Can include {'options': ...} for client instantiation.")] = None
 ) -> Union[List[Dict], Dict]:
     """Internal use: Fetches public market trades. Primary description is in @mcp.tool decorator."""
     tool_params = params.copy() if params else {}
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
     client_config_options = tool_params.pop('options', None)
     exchange : ccxtasync.Exchange = None
     try:
-        exchange = await get_exchange_instance(exchange_id, api_key_info=None, exchange_config_options=client_config_options)
+        exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['fetchTrades']:
             return {"error": f"Exchange '{exchange_id}' does not support fetchTrades."}
         trades = await exchange.fetchTrades(symbol, since, limit, params=tool_params)
@@ -437,21 +509,24 @@ async def fetch_trades_tool(
 
 @mcp.tool(
     name="create_spot_limit_order",
-    description="Places a new spot limit order on the exchange. Requires API authentication and trading permissions.",
+    description="Places a new spot limit order on the exchange. Requires API authentication (api_key, secret_key) and trading permissions.",
     tags={"trading", "order", "create", "spot", "limit", "private"}
 )
 async def create_spot_limit_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="API key with trading permissions.")],
-    secret_key: Annotated[str, Field(description="Secret key for the API.")],
     symbol: Annotated[str, Field(description="Symbol to trade (e.g., 'BTC/USDT').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' or 'sell'.")],
     amount: Annotated[float, Field(description="Amount of currency to trade.", gt=0)],
     price: Annotated[float, Field(description="Price for the limit order.", gt=0)],
+    api_key: Annotated[Optional[str], Field(description="API key with trading permissions. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Secret key for the API. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters (e.g., clientOrderId). Can include 'options' for CCXT client config (though typically not needed for spot). ")] = None
 ) -> Dict:
     """Internal use: Creates a spot limit order. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for create_spot_limit_order."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -476,20 +551,23 @@ async def create_spot_limit_order_tool(
 
 @mcp.tool(
     name="create_spot_market_order",
-    description="Places a new spot market order on the exchange. Requires API authentication and trading permissions.",
+    description="Places a new spot market order on the exchange. Requires API authentication (api_key, secret_key) and trading permissions.",
     tags={"trading", "order", "create", "spot", "market", "private"}
 )
 async def create_spot_market_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="API key with trading permissions.")],
-    secret_key: Annotated[str, Field(description="Secret key for the API.")],
     symbol: Annotated[str, Field(description="Symbol to trade (e.g., 'BTC/USDT').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' or 'sell'.")],
     amount: Annotated[float, Field(description="Amount of currency to trade.", gt=0)],
+    api_key: Annotated[Optional[str], Field(description="API key with trading permissions. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Secret key for the API. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters (e.g., clientOrderId). Can include 'options' for CCXT client config (though typically not needed for spot). ")] = None
 ) -> Dict:
     """Internal use: Creates a spot market order. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for create_spot_market_order."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -515,21 +593,24 @@ async def create_spot_market_order_tool(
 
 @mcp.tool(
     name="create_futures_limit_order",
-    description="Places a new futures limit order. Requires API authentication. Ensure client is configured for futures (e.g., params={'options': {'defaultType': 'future'}}).",
+    description="Places a new futures limit order. Requires API authentication (api_key, secret_key). Ensure client is configured for futures (e.g., params={'options': {'defaultType': 'future'}}).",
     tags={"trading", "order", "create", "futures", "limit", "private"}
 )
 async def create_futures_limit_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="API key with trading permissions.")],
-    secret_key: Annotated[str, Field(description="Secret key for the API.")],
     symbol: Annotated[str, Field(description="Futures symbol to trade (e.g., 'BTC/USDT:USDT').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' or 'sell'.")],
     amount: Annotated[float, Field(description="Amount of contracts/currency to trade.", gt=0)],
     price: Annotated[float, Field(description="Price for the limit order.", gt=0)],
+    api_key: Annotated[Optional[str], Field(description="API key with trading permissions. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Secret key for the API. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. CRITICAL: Include {'options': {'defaultType': 'future'}} or similar for client instantiation if not default for the exchange.")] = None
 ) -> Dict:
     """Internal use: Creates a futures limit order. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for create_futures_limit_order."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -554,20 +635,23 @@ async def create_futures_limit_order_tool(
 
 @mcp.tool(
     name="create_futures_market_order",
-    description="Places a new futures market order. Requires API authentication. Ensure client is configured for futures (e.g., params={'options': {'defaultType': 'future'}}).",
+    description="Places a new futures market order. Requires API authentication (api_key, secret_key). Ensure client is configured for futures (e.g., params={'options': {'defaultType': 'future'}}).",
     tags={"trading", "order", "create", "futures", "market", "private"}
 )
 async def create_futures_market_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="API key with trading permissions.")],
-    secret_key: Annotated[str, Field(description="Secret key for the API.")],
     symbol: Annotated[str, Field(description="Futures symbol to trade (e.g., 'BTC/USDT:USDT').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' or 'sell'.")],
     amount: Annotated[float, Field(description="Amount of contracts/currency to trade.", gt=0)],
+    api_key: Annotated[Optional[str], Field(description="API key with trading permissions. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Secret key for the API. Required for this operation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. CRITICAL: Include {'options': {'defaultType': 'future'}} or similar for client instantiation if not default for the exchange.")] = None
 ) -> Dict:
     """Internal use: Creates a futures market order. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for create_futures_market_order."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -592,19 +676,22 @@ async def create_futures_market_order_tool(
 
 @mcp.tool(
     name="cancel_order",
-    description="Cancels an existing open order on the exchange. Requires API authentication.",
+    description="Cancels an existing open order on the exchange. Requires API authentication (api_key, secret_key).",
     tags={"trading", "order", "cancel", "private"}
 )
 async def cancel_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="Your API key.")],
-    secret_key: Annotated[str, Field(description="Your secret key.")],
     id: Annotated[str, Field(description="The order ID to cancel.")],
+    api_key: Annotated[Optional[str], Field(description="Your API key. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key. Required for this operation.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: Symbol of the order (e.g., 'BTC/USDT'). Required by some exchanges.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Can include 'options' for CCXT client config.")] = None
 ) -> Dict:
     """Internal use: Cancels an order. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for cancel_order."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -629,13 +716,13 @@ async def cancel_order_tool(
 
 @mcp.tool(
     name="fetch_order_history",
-    description="Fetches a list of orders (open, closed, or all) for an account or a specific symbol. Requires API authentication.",
+    description="Fetches a list of orders (open, closed, or all) for an account or a specific symbol. Requires API authentication (api_key, secret_key).",
     tags={"account", "orders", "history", "private"}
 )
 async def fetch_orders_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="Your API key.")],
-    secret_key: Annotated[str, Field(description="Your secret key.")],
+    api_key: Annotated[Optional[str], Field(description="Your API key. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key. Required for this operation.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: Symbol (e.g., 'BTC/USDT') to fetch orders for.")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp (milliseconds, UTC) to fetch orders since.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of orders to fetch.", gt=0)] = None,
@@ -643,6 +730,9 @@ async def fetch_orders_tool(
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Can include 'options' for CCXT client config.")] = None
 ) -> Union[List[Dict], Dict]:
     """Internal use: Fetches order history. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for fetch_order_history."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -669,13 +759,13 @@ async def fetch_orders_tool(
 
 @mcp.tool(
     name="fetch_my_trade_history",
-    description="Fetches the history of trades executed by the authenticated user. Requires API authentication.",
+    description="Fetches the history of trades executed by the authenticated user. Requires API authentication (api_key, secret_key).",
     tags={"account", "trades", "history", "private"}
 )
 async def fetch_my_trades_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange.")],
-    api_key: Annotated[str, Field(description="Your API key.")],
-    secret_key: Annotated[str, Field(description="Your secret key.")],
+    api_key: Annotated[Optional[str], Field(description="Your API key. Required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key. Required for this operation.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: Symbol (e.g., 'BTC/USDT') to fetch your trades for.")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp (milliseconds, UTC) to fetch your trades since.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of your trades to fetch.", gt=0)] = None,
@@ -683,6 +773,9 @@ async def fetch_my_trades_tool(
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters. Can include 'options' for CCXT client config.")] = None
 ) -> Union[List[Dict], Dict]:
     """Internal use: Fetches user's trade history. Primary description is in @mcp.tool decorator."""
+    if not api_key or not secret_key:
+        return {"error": "API key and secret key are required for fetch_my_trade_history."}
+        
     tool_params = params.copy() if params else {}
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
@@ -708,4 +801,4 @@ async def fetch_my_trades_tool(
 # --- Main execution (for running the server) ---
 if __name__ == "__main__":
     print("Starting CCXT MCP Server (Async with Annotated Params and Tool Metadata)...")
-    mcp.run() 
+    mcp.run()
