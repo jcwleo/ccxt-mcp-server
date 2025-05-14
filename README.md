@@ -18,7 +18,7 @@ This server is built using [FastMCP](https://gofastmcp.com/), which simplifies t
 
 1.  **Clone the repository (if you haven't already):**
     ```bash
-    git clone <your-repo-url> # Replace with your repository URL
+    git clone https://github.com/jcwleo/ccxt-mcp-server.git
     cd ccxt-mcp-server
     ```
 
