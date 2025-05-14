@@ -1,4 +1,5 @@
 # CCXT MCP Server
+[![smithery badge](https://smithery.ai/badge/@jcwleo/ccxt-mcp-server)](https://smithery.ai/server/@jcwleo/ccxt-mcp-server)
 
 This project provides a Model Context Protocol (MCP) server that exposes various functions from the [CCXT](https://github.com/ccxt/ccxt) library as tools for Large Language Models (LLMs).
 
