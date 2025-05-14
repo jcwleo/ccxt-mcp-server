@@ -47,7 +47,7 @@ This server is built using [FastMCP](https://gofastmcp.com/), which simplifies t
 Once the dependencies are installed, you can run the MCP server directly:
 
 ```bash
-python mcp_server.py
+uv run mcp_server.py
 ```
 
 You should see output indicating the server has started, similar to:
