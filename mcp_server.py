@@ -75,15 +75,15 @@ async def get_exchange_instance(
 @mcp.tool(
     name="fetch_account_balance",
     description="Fetches the current balance of an account from a specified cryptocurrency exchange. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "Use the `params` argument to specify account type (e.g., spot, margin, futures) if the exchange requires it, "
                 "or to pass other exchange-specific parameters for fetching balances.",
     tags={"account", "balance", "wallet", "funds", "private", "spot", "margin", "futures", "swap", "unified"}
 )
 async def fetch_balance_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'coinbasepro', 'upbit'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for fetching account balances.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for fetching account balances.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange (e.g., for KuCoin, OKX).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchBalance` call or for CCXT client instantiation. "
                                                         "Use this to specify market types (e.g., `{'type': 'margin'}` or `{'options': {'defaultType': 'future'}}`), "
@@ -118,15 +118,15 @@ async def fetch_balance_tool(
 @mcp.tool(
     name="fetch_deposit_address",
     description="Fetches the deposit address for a specific cryptocurrency on a given exchange. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "The `params` argument can be used to specify the network or chain if the currency supports multiple (e.g., ERC20, TRC20).",
     tags={"account", "deposit", "address", "funding", "receive", "private", "crypto"}
 )
 async def fetch_deposit_address_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kraken'). Case-insensitive.")],
     code: Annotated[str, Field(description="Currency code to fetch the deposit address for (e.g., 'BTC', 'ETH', 'USDT').")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchDepositAddress` call or for client instantiation. "
                                                         "Crucially, use this to specify the network/chain if the cryptocurrency exists on multiple networks. "
@@ -161,7 +161,7 @@ async def fetch_deposit_address_tool(
 @mcp.tool(
     name="withdraw_cryptocurrency",
     description="Initiates a cryptocurrency withdrawal to a specified address. "
-                "Requires API authentication (api_key, secret_key) and withdrawal permissions on the API key. "
+                "API authentication (api_key, secret_key) and withdrawal permissions on the API key are handled externally. "
                 "Use `params` to specify the network/chain if required by the exchange or currency, and for any other exchange-specific withdrawal parameters.",
     tags={"account", "withdrawal", "transaction", "send", "crypto", "private"}
 )
@@ -170,8 +170,8 @@ async def withdraw_tool(
     code: Annotated[str, Field(description="Currency code for the withdrawal (e.g., 'BTC', 'ETH', 'USDT').")],
     amount: Annotated[float, Field(description="The amount of currency to withdraw. Must be greater than 0.", gt=0)],
     address: Annotated[str, Field(description="The destination address for the withdrawal.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key with withdrawal permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with withdrawal permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     tag: Annotated[Optional[str], Field(description="Optional: Destination tag, memo, or payment ID for certain currencies (e.g., XRP, XLM, EOS). Check exchange/currency requirements.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for withdrawals.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `withdraw` call or for client instantiation. "
@@ -208,15 +208,15 @@ async def withdraw_tool(
 @mcp.tool(
     name="fetch_open_positions",
     description="Fetches currently open positions for futures, swaps, or other derivatives from an exchange. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "CRITICAL: The CCXT client MUST be initialized for the correct market type (e.g., futures, swap) using `params`. "
                 "For example, pass `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'swap'}}` in `params` if not default for the exchange.",
     tags={"account", "positions", "futures", "derivatives", "swap", "margin_trading", "private"}
 )
 async def fetch_positions_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange that supports derivatives trading (e.g., 'binance', 'bybit', 'okx'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for fetching positions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for fetching positions.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchPositions` call AND for CCXT client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', 'linear', 'inverse') to specify market type if not the exchange default. "
@@ -252,7 +252,7 @@ async def fetch_positions_tool(
 @mcp.tool(
     name="set_trading_leverage",
     description="Sets the leverage for a specific trading symbol, typically in futures or margin markets. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "CRITICAL: Ensure the CCXT client is initialized for the correct market type (e.g., futures, margin) using `params` (e.g., `{'options': {'defaultType': 'future'}}`). "
                 "The `symbol` parameter may or may not be required depending on the exchange and whether setting leverage for all symbols or a specific one.",
     tags={"trading", "leverage", "futures", "margin", "derivatives", "private"}
@@ -260,8 +260,8 @@ async def fetch_positions_tool(
 async def set_leverage_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
     leverage: Annotated[int, Field(description="The desired leverage multiplier (e.g., 10 for 10x). Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional/Required: The symbol (e.g., 'BTC/USDT:USDT' for futures, 'BTC/USDT' for margin) to set leverage for. "
                                                        "Some exchanges require it, others set it account-wide or per market type. Check exchange documentation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
@@ -580,7 +580,7 @@ async def fetch_trades_tool(
 @mcp.tool(
     name="create_spot_limit_order",
     description="Places a new limit order in the spot market. "
-                "Requires API authentication (api_key, secret_key) and trading permissions on the API key. "
+                "API authentication (api_key, secret_key) and trading permissions on the API key are handled externally. "
                 "Use `params` for exchange-specific order parameters like `clientOrderId`, `postOnly`, or time-in-force policies (e.g., `{'timeInForce': 'FOK'}`).",
     tags={"trading", "order", "create", "spot", "limit", "buy", "sell", "private"}
 )
@@ -590,12 +590,12 @@ async def create_spot_limit_order_tool(
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
     amount: Annotated[float, Field(description="The quantity of the base currency to trade. Must be greater than 0.", gt=0)],
     price: Annotated[float, Field(description="The price at which to place the limit order. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `createOrder` call. "
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}` for custom order identification, "
-                                                        "or specifying order properties like `{'postOnly': True}` (maker-only) or time-in-force policies (e.g., `{'timeInForce': 'GTC' / 'IOC' / 'FOK'}). "
+                                                        "or specifying order properties like `{'postOnly': True}` (maker-only) or time-in-force policies (e.g., `{'timeInForce': 'GTC' / 'IOC' / 'FOK'}`). "
                                                         "Example: `{'clientOrderId': 'my_spot_order_123', 'timeInForce': 'FOK'}`. "
                                                         "No `options` for client instantiation are typically needed for spot orders unless the exchange has specific requirements.")] = None
 ) -> Dict:
@@ -628,7 +628,7 @@ async def create_spot_limit_order_tool(
 @mcp.tool(
     name="create_spot_market_order",
     description="Places a new market order in the spot market, to be filled at the best available current price. "
-                "Requires API authentication (api_key, secret_key) and trading permissions on the API key. "
+                "API authentication (api_key, secret_key) and trading permissions on the API key are handled externally. "
                 "Use `params` for exchange-specific order parameters like `clientOrderId` or quote order quantity (if supported).",
     tags={"trading", "order", "create", "spot", "market", "buy", "sell", "private"}
 )
@@ -638,8 +638,8 @@ async def create_spot_market_order_tool(
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
     amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy) or the quantity to sell (for a market sell). Must be greater than 0. "
                                             "Some exchanges allow specifying quoteOrderQty in `params` for market buys (e.g., buy $100 worth of BTC).")],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `createOrder` call. "
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}`. "
@@ -676,7 +676,7 @@ async def create_spot_market_order_tool(
 @mcp.tool(
     name="create_futures_limit_order",
     description="Places a new limit order in a futures/swap market. "
-                "Requires API authentication (api_key, secret_key) and trading permissions. "
+                "API authentication (api_key, secret_key) and trading permissions are handled externally. "
                 "CRITICAL: The CCXT client MUST be initialized for the correct market type (e.g., 'future', 'swap') using `params` (e.g., `{'options': {'defaultType': 'future'}}`). "
                 "Use `params` also for exchange-specific order parameters like `clientOrderId`, `postOnly`, `reduceOnly`, `timeInForce`.",
     tags={"trading", "order", "create", "futures", "swap", "derivatives", "limit", "buy", "sell", "private"}
@@ -687,8 +687,8 @@ async def create_futures_limit_order_tool(
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' for a long position, 'sell' for a short position.")],
     amount: Annotated[float, Field(description="The quantity of contracts or base currency to trade. Must be greater than 0.", gt=0)],
     price: Annotated[float, Field(description="The price at which to place the limit order. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `createOrder` call AND for client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', 'linear', 'inverse' etc., depending on exchange and contract) to specify market type. "
@@ -724,7 +724,7 @@ async def create_futures_limit_order_tool(
 @mcp.tool(
     name="create_futures_market_order",
     description="Places a new market order in a futures/swap market, filled at the best available current price. "
-                "Requires API authentication (api_key, secret_key) and trading permissions. "
+                "API authentication (api_key, secret_key) and trading permissions are handled externally. "
                 "CRITICAL: The CCXT client MUST be initialized for the correct market type (e.g., 'future', 'swap') using `params` (e.g., `{'options': {'defaultType': 'future'}}`). "
                 "Use `params` also for exchange-specific parameters like `clientOrderId` or `reduceOnly`.",
     tags={"trading", "order", "create", "futures", "swap", "derivatives", "market", "buy", "sell", "private"}
@@ -734,8 +734,8 @@ async def create_futures_market_order_tool(
     symbol: Annotated[str, Field(description="The futures/swap contract symbol to trade (e.g., 'BTC/USDT:USDT', 'ETH-PERP'). Format is exchange-specific.")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' for a long position, 'sell' for a short position.")],
     amount: Annotated[float, Field(description="The quantity of contracts or base currency to trade. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `createOrder` call AND for client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', etc.) to specify market type. "
@@ -772,7 +772,7 @@ async def create_futures_market_order_tool(
 @mcp.tool(
     name="cancel_order",
     description="Cancels an existing open order on an exchange. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "The `symbol` parameter is required by some exchanges, optional for others. "
                 "If canceling an order in a non-spot market (futures, options), ensure the CCXT client is initialized correctly using `params` (e.g., `{'options': {'defaultType': 'future'}}`).",
     tags={"trading", "order", "cancel", "manage_order", "private"}
@@ -780,8 +780,8 @@ async def create_futures_market_order_tool(
 async def cancel_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
     id: Annotated[str, Field(description="The order ID (string) of the order to be canceled.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions. Required for this operation.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API. Required for this operation.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional/Required: The symbol of the order (e.g., 'BTC/USDT', 'BTC/USDT:USDT'). "
                                                        "Required by some exchanges for `cancelOrder`, optional for others. Check exchange documentation.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange.")] = None,
@@ -819,15 +819,15 @@ async def cancel_order_tool(
 @mcp.tool(
     name="fetch_order_history",
     description="Fetches a list of your orders (open, closed, canceled, etc.) for an account, optionally filtered by symbol, time, and limit. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "If fetching orders from a non-spot market (futures, options), ensure the CCXT client is initialized correctly using `params` (e.g., `{'options': {'defaultType': 'future'}}`). "
                 "Some exchanges might use `fetchOrders` to get only open or closed orders by default; use `params` for finer control if supported (e.g. `{'status': 'open'}`).",
     tags={"account", "orders", "history", "trade_history", "manage_order", "private"}
 )
 async def fetch_orders_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kucoin'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key. Required for fetching order history.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key. Required for fetching order history.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: The symbol (e.g., 'BTC/USDT', 'ETH/USDT:USDT') to fetch orders for. If omitted, orders for all symbols may be returned (exchange-dependent).")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp in milliseconds (UTC epoch) to fetch orders created since this time.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of orders to retrieve. Check exchange for default and maximum limits.", gt=0)] = None,
@@ -868,15 +868,15 @@ async def fetch_orders_tool(
 @mcp.tool(
     name="fetch_my_trade_history",
     description="Fetches the history of your executed trades (fills) for an account, optionally filtered by symbol, time, and limit. "
-                "Requires API authentication (api_key, secret_key). "
+                "API authentication (api_key, secret_key) is handled externally. "
                 "If fetching trades from a non-spot market (futures, options), ensure the CCXT client is initialized correctly using `params` (e.g., `{'options': {'defaultType': 'future'}}`). "
                 "Use `params` for any exchange-specific filtering not covered by standard arguments (e.g., filtering by orderId).",
     tags={"account", "trades", "executions", "fills", "history", "trade_history", "private"}
 )
 async def fetch_my_trades_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key. Required for fetching your trade history.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key. Required for fetching your trade history.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Your API key.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Your secret key.")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: The symbol (e.g., 'BTC/USDT', 'BTC/USDT:USDT') to fetch your trades for. If omitted, trades for all symbols may be returned (exchange-dependent).")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp in milliseconds (UTC epoch) to fetch trades executed since this time.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of trades to retrieve. Check exchange for default and maximum limits.", gt=0)] = None,
