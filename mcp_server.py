@@ -649,14 +649,15 @@ async def create_spot_market_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kraken'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The spot market symbol to trade (e.g., 'BTC/USDT', 'ETH/EUR').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
-    amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy) or the quantity to sell (for a market sell). Must be greater than 0. ", gt=0)],
+    amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy, unless 'createMarketBuyOrderRequiresPrice' is False, then it's the quote currency amount for some exchanges like Upbit) or the quantity to sell (for a market sell). Must be greater than 0.", gt=0)],
     api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
     secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `createOrder` call. "
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}`. "
                                                         "For market buy orders, some exchanges allow `{'quoteOrderQty': quote_amount}` to specify the amount in quote currency (e.g., spend 100 USDT on BTC). "
-                                                        "Example: `{'clientOrderId': 'my_market_buy_001', 'quoteOrderQty': 100}` for a $100 market buy. "
+                                                        "For exchanges like Upbit market buy, you might need to pass `{'createMarketBuyOrderRequiresPrice': False}` if `amount` represents the total cost in quote currency. "
+                                                        "Example: `{'clientOrderId': 'my_market_buy_001', 'quoteOrderQty': 100}`. "
                                                         "No `options` for client instantiation are typically needed for spot orders.")] = None
 ) -> Dict:
     """Internal use: Creates a spot market order. Primary description is in @mcp.tool decorator."""
@@ -664,6 +665,11 @@ async def create_spot_market_order_tool(
         return {"error": "API key and secret key are required for create_spot_market_order."}
         
     tool_params = params.copy() if params else {}
+    # For Upbit market buy orders, 'amount' is the total cost in KRW.
+    # CCXT requires 'createMarketBuyOrderRequiresPrice': False to be set in params.
+    if exchange_id.lower() == 'upbit' and side == 'buy':
+        tool_params['createMarketBuyOrderRequiresPrice'] = False
+
     api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
     if passphrase:
         api_key_info_dict['password'] = passphrase
