@@ -649,9 +649,7 @@ async def create_spot_market_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kraken'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The spot market symbol to trade (e.g., 'BTC/USDT', 'ETH/EUR').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
-    amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy) or the quantity to sell (for a market sell). Must be greater than 0. "
-                                            "For market buy orders on certain exchanges like Upbit, this 'amount' should be the total cost (quote currency) to spend, and you MUST pass `{'createMarketBuyOrderRequiresPrice': False}` in the `params` argument. "
-                                            "For other exchanges, `params` might support `{'quoteOrderQty': quote_amount}` to specify the amount in quote currency.", gt=0)],
+    amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy) or the quantity to sell (for a market sell). Must be greater than 0. ", gt=0)],
     api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
     secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
     passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
@@ -659,7 +657,6 @@ async def create_spot_market_order_tool(
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}`. "
                                                         "For market buy orders, some exchanges allow `{'quoteOrderQty': quote_amount}` to specify the amount in quote currency (e.g., spend 100 USDT on BTC). "
                                                         "Example: `{'clientOrderId': 'my_market_buy_001', 'quoteOrderQty': 100}` for a $100 market buy. "
-                                                        "For Upbit market buy by cost: `{'createMarketBuyOrderRequiresPrice': False}` (and provide total cost in 'amount'). "
                                                         "No `options` for client instantiation are typically needed for spot orders.")] = None
 ) -> Dict:
     """Internal use: Creates a spot market order. Primary description is in @mcp.tool decorator."""
@@ -683,8 +680,6 @@ async def create_spot_market_order_tool(
         if side == "buy":
             if not hasattr(exchange, 'create_market_buy_order'):
                 return {"error": f"Exchange '{exchange_id}' does not support create_market_buy_order via a dedicated method. Falling back to createOrder."}
-            # For market buy, Upbit and some others might require cost in amount and params={'createMarketBuyOrderRequiresPrice': False}
-            # This logic is now expected to be handled by the user via the 'params' argument based on the updated tool description.
             order = await exchange.create_market_buy_order(symbol, amount, params=tool_params)
         elif side == "sell":
             if not hasattr(exchange, 'create_market_sell_order'):
