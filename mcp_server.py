@@ -6,6 +6,27 @@ from fastmcp import FastMCP
 import asyncio
 from pydantic import Field
 
+# --- Constants for CCXT Exception Handling ---
+CCXT_GENERAL_EXCEPTIONS = (
+    ccxtasync.AuthenticationError, # Covers PermissionDenied, AccountNotEnabled, AccountSuspended
+    ccxtasync.ArgumentsRequired,
+    ccxtasync.BadRequest,          # Covers BadSymbol
+    ccxtasync.OperationRejected,   # Covers NoChange, MarginModeAlreadySet, MarketClosed, ManualInteractionNeeded
+    ccxtasync.InsufficientFunds,
+    ccxtasync.InvalidAddress,      # Covers AddressPending
+    ccxtasync.InvalidOrder,        # Covers OrderNotFound, OrderNotCached, etc.
+    # NotSupported is handled specifically in some tools or can be added here if generally handled.
+    ccxtasync.InvalidProxySettings,
+    ccxtasync.ExchangeClosedByUser,
+    ccxtasync.NetworkError,        # Covers DDoSProtection, RateLimitExceeded, ExchangeNotAvailable, InvalidNonce, RequestTimeout, OnMaintenance, ChecksumError
+    ccxtasync.BadResponse,         # Covers NullResponse
+    ccxtasync.CancelPending,
+    ccxtasync.ExchangeNotFound,    # Specific error from ccxtasync for non-existent exchange_id
+    ccxtasync.UnsubscribeError,    # Less common for REST but for completeness
+    ccxtasync.ExchangeError,       # General ccxt exchange error, placed after more specific ones
+    ValueError
+)
+
 # Initialize FastMCP
 mcp = FastMCP("CCXT MCP Server 🚀")
 
@@ -82,9 +103,9 @@ async def get_exchange_instance(
 )
 async def fetch_balance_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'coinbasepro', 'upbit'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange (e.g., for KuCoin, OKX).")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange (e.g., for KuCoin, OKX). Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchBalance` call or for CCXT client instantiation. "
                                                         "Use this to specify market types (e.g., `{'type': 'margin'}` or `{'options': {'defaultType': 'future'}}`), "
                                                         "or pass other exchange-specific arguments. "
@@ -107,8 +128,10 @@ async def fetch_balance_tool(
             return {"error": f"Exchange '{exchange_id}' does not support fetchBalance."}
         balance = await exchange.fetchBalance(params=tool_params)
         return balance
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e: # Example of specific handling if needed, though covered by general if not separately handled
+        return {"error": f"Operation Not Supported: {str(e)}"} # More specific message
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_account_balance: {str(e)}"}
     finally:
@@ -125,9 +148,9 @@ async def fetch_balance_tool(
 async def fetch_deposit_address_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kraken'). Case-insensitive.")],
     code: Annotated[str, Field(description="Currency code to fetch the deposit address for (e.g., 'BTC', 'ETH', 'USDT').")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchDepositAddress` call or for client instantiation. "
                                                         "Crucially, use this to specify the network/chain if the cryptocurrency exists on multiple networks. "
                                                         "Example: `{'network': 'TRC20'}` for USDT on Tron network, or `{'chain': 'BEP20'}`. "
@@ -150,8 +173,10 @@ async def fetch_deposit_address_tool(
             return {"error": f"Exchange '{exchange_id}' does not support fetchDepositAddress."}
         address_info = await exchange.fetchDepositAddress(code, params=tool_params)
         return address_info
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_deposit_address: {str(e)}"}
     finally:
@@ -170,10 +195,10 @@ async def withdraw_tool(
     code: Annotated[str, Field(description="Currency code for the withdrawal (e.g., 'BTC', 'ETH', 'USDT').")],
     amount: Annotated[float, Field(description="The amount of currency to withdraw. Must be greater than 0.", gt=0)],
     address: Annotated[str, Field(description="The destination address for the withdrawal.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key with withdrawal permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with withdrawal permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
     tag: Annotated[Optional[str], Field(description="Optional: Destination tag, memo, or payment ID for certain currencies (e.g., XRP, XLM, EOS). Check exchange/currency requirements.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for withdrawals.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for withdrawals. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `withdraw` call or for client instantiation. "
                                                         "Use this to specify the network/chain (e.g., `{'network': 'BEP20'}`), especially if the currency supports multiple. "
                                                         "May also be used for two-factor authentication codes if supported/required by the exchange via CCXT, or other specific withdrawal options. "
@@ -197,8 +222,10 @@ async def withdraw_tool(
         
         withdrawal_info = await exchange.withdraw(code, amount, address, tag, params=tool_params)
         return withdrawal_info
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in withdraw_cryptocurrency: {str(e)}"}
     finally:
@@ -215,9 +242,9 @@ async def withdraw_tool(
 )
 async def fetch_positions_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange that supports derivatives trading (e.g., 'binance', 'bybit', 'okx'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchPositions` call AND for CCXT client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', 'linear', 'inverse') to specify market type if not the exchange default. "
                                                         "For the API call: Can be used to filter positions by symbol(s) if supported by the exchange (e.g., `{'symbols': ['BTC/USDT:USDT', 'ETH/USDT:USDT']}`). "
@@ -241,8 +268,10 @@ async def fetch_positions_tool(
 
         positions = await exchange.fetchPositions(params=tool_params)
         return positions
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e: # Catch NotSupported here if it wasn't in CCXT_GENERAL_EXCEPTIONS
+        return {"error": f"FetchPositions Not Supported or requires specific config: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_open_positions: {str(e)}"}
     finally:
@@ -260,11 +289,11 @@ async def fetch_positions_tool(
 async def set_leverage_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
     leverage: Annotated[int, Field(description="The desired leverage multiplier (e.g., 10 for 10x). Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the exchange.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional/Required: The symbol (e.g., 'BTC/USDT:USDT' for futures, 'BTC/USDT' for margin) to set leverage for. "
                                                        "Some exchanges require it, others set it account-wide or per market type. Check exchange documentation.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `setLeverage` call AND for CCXT client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'margin'}}` if applicable. "
                                                         "For the API call: May include parameters like `{'marginMode': 'isolated'}` or `{'marginMode': 'cross'}` if supported. "
@@ -285,9 +314,11 @@ async def set_leverage_tool(
         exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         response = await exchange.setLeverage(leverage, symbol, params=tool_params)
         return response
-    except ccxtasync.NotSupported as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
+        return {"error": str(e)}
+    except ccxtasync.NotSupported as e: # Keep NotSupported specific for this as per original logic
         return {"error": f"Exchange '{exchange_id}' does not support the unified setLeverage with the provided arguments. Error: {str(e)}. You may need to use exchange-specific 'params' or check symbol requirements."}
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e: # Catch other general exceptions after specific NotSupported
         return {"error": str(e)}
     except Exception as e:
         return {"error": f"An unexpected error occurred in set_trading_leverage: {str(e)}"}
@@ -310,9 +341,9 @@ async def fetch_ohlcv_tool(
     timeframe: Annotated[str, Field(description="The length of time each candle represents (e.g., '1m', '5m', '1h', '1d', '1w'). Check exchange for supported timeframes.")],
     since: Annotated[Optional[int], Field(description="Optional: The earliest time in milliseconds (UTC epoch) to fetch OHLCV data from (e.g., 1502962800000 for 2017-08-17T10:00:00Z).", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: The maximum number of OHLCV candles to return. Check exchange for default and maximum limits.", gt=0)] = None,
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. May provide access to more data or higher rate limits.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchOHLCV` call or for client instantiation. "
                                                         "For client init (if fetching non-spot): `{'options': {'defaultType': 'future'}}`. "
                                                         "For API call: To specify price type for derivatives (e.g., `{'price': 'mark'}` or `{'price': 'index'}`) or other exchange-specific query params. "
@@ -335,8 +366,10 @@ async def fetch_ohlcv_tool(
         
         ohlcv_data = await exchange.fetchOHLCV(symbol, timeframe, since, limit, params=tool_params)
         return ohlcv_data
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_ohlcv: {str(e)}"}
     finally:
@@ -354,9 +387,9 @@ async def fetch_ohlcv_tool(
 async def fetch_funding_rate_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'bybit'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The symbol to fetch the funding rate for (e.g., 'BTC/USDT:USDT', 'ETH-PERP'). Ensure correct perpetual contract symbol format for the exchange.")],
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `fetchFundingRate` call or client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'swap'}}` for correct market type. "
                                                         "For API call: May be used for historical rates if supported (e.g., `{'since': timestamp, 'limit': N}`). "
@@ -381,8 +414,10 @@ async def fetch_funding_rate_tool(
         
         funding_rate = await exchange.fetchFundingRate(symbol, params=tool_params)
         return funding_rate
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_funding_rate: {str(e)}"}
     finally:
@@ -401,9 +436,9 @@ async def fetch_long_short_ratio_tool(
     symbol: Annotated[str, Field(description="The symbol to fetch the long/short ratio for (e.g., 'BTC/USDT', 'BTC/USDT:USDT'). Format depends on the specific exchange method.")],
     timeframe: Annotated[str, Field(description="Timeframe for the ratio data (e.g., '5m', '1h', '4h', '1d'). Format depends on the specific exchange method.")],
     limit: Annotated[Optional[int], Field(description="Optional: Number of data points to retrieve. Depends on the specific exchange method.", gt=0)] = None,
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="CRUCIAL: Must contain `method_name` (string: the exact CCXT implicit method name, e.g., 'publicGetFuturesDataOpenInterestHist') and `method_params` (dict: arguments for that method). "
                                                         "Can also include `{'options': {'defaultType': 'future'}}` for client instantiation if needed. "
                                                         "Example: `{'options': {'defaultType': 'future'}, 'method_name': 'fapiPublicGetGlobalLongShortAccountRatio', 'method_params': {'period': '5m'}}`")] = None
@@ -438,8 +473,10 @@ async def fetch_long_short_ratio_tool(
             return data
         else:
             return {"error": f"fetchLongShortRatio is not standard or method_name missing. Exchange '{exchange_id}' may not have '{method_name}'. Provide 'method_name' and 'method_params' in 'params'."}
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e: # If method_name was valid but underlying CCXT call is not supported for the exchange
+        return {"error": f"Implicit method call Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_long_short_ratio: {str(e)}"}
     finally:
@@ -456,9 +493,9 @@ async def fetch_long_short_ratio_tool(
 async def fetch_option_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange that supports options trading (e.g., 'deribit', 'okx'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The specific option contract symbol (e.g., 'BTC-28JUN24-70000-C' on Deribit). Format is exchange-specific.")],
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `fetchTicker` (or other relevant fetch calls for options) AND for client instantiation. "
                                                         "For client setup: Include `{'options': {'defaultType': 'option'}}` or similar for correct market type if needed. "
                                                         "For API call: May include exchange-specific params if `fetchTicker` is used or for other option data methods. "
@@ -482,8 +519,10 @@ async def fetch_option_tool(
             return option_data
         else:
             return {"error": f"Exchange '{exchange_id}' does not have a standard fetchOption or fetchTicker."}
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_option_contract_data: {str(e)}"}
     finally:
@@ -500,9 +539,9 @@ async def fetch_option_tool(
 async def fetch_ticker_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'coinbase'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The symbol to fetch the ticker for (e.g., 'BTC/USDT', 'ETH/USD', 'BTC/USDT:USDT' for futures, 'BTC-28JUN24-70000-C' for options). Format depends on the market type and exchange.")],
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchTicker` call or for client instantiation. "
                                                         "For client init (if non-spot): `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'option'}}`. "
                                                         "For API call: May include exchange-specific params if the exchange offers variations on ticker data. "
@@ -524,8 +563,10 @@ async def fetch_ticker_tool(
             return {"error": f"Exchange '{exchange_id}' does not support fetchTicker."}
         ticker = await exchange.fetchTicker(symbol, params=tool_params)
         return ticker
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_market_ticker: {str(e)}"}
     finally:
@@ -543,9 +584,9 @@ async def fetch_trades_tool(
     symbol: Annotated[str, Field(description="The symbol to fetch public trades for (e.g., 'BTC/USDT', 'ETH/USD', 'BTC/USDT:USDT' for futures). Format depends on the market type and exchange.")],
     since: Annotated[Optional[int], Field(description="Optional: Timestamp in milliseconds (UTC epoch) to fetch trades since (e.g., 1609459200000 for 2021-01-01T00:00:00Z).", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of trades to fetch. Check exchange for default and maximum limits.", gt=0)] = None,
-    api_key: Annotated[Optional[str], Field(description="Optional: Your API key. May provide higher rate limits.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `fetchTrades` call or for client instantiation. "
                                                         "For client init (if non-spot): `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'option'}}`. "
                                                         "For API call: May include exchange-specific pagination or filtering parameters. "
@@ -567,8 +608,10 @@ async def fetch_trades_tool(
             return {"error": f"Exchange '{exchange_id}' does not support fetchTrades."}
         trades = await exchange.fetchTrades(symbol, since, limit, params=tool_params)
         return trades
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Operation Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_public_market_trades: {str(e)}"}
     finally:
@@ -590,9 +633,9 @@ async def create_spot_limit_order_tool(
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
     amount: Annotated[float, Field(description="The quantity of the base currency to trade. Must be greater than 0.", gt=0)],
     price: Annotated[float, Field(description="The price at which to place the limit order. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with trading permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `createOrder` call. "
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}` for custom order identification, "
                                                         "or specifying order properties like `{'postOnly': True}` (maker-only) or time-in-force policies (e.g., `{'timeInForce': 'GTC' / 'IOC' / 'FOK'}`). "
@@ -630,8 +673,10 @@ async def create_spot_limit_order_tool(
             
         # order = await exchange.createOrder(symbol, 'limit', side, amount, price, params=tool_params)
         return order
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Order creation Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in create_spot_limit_order: {str(e)}"}
     finally:
@@ -650,9 +695,9 @@ async def create_spot_market_order_tool(
     symbol: Annotated[str, Field(description="The spot market symbol to trade (e.g., 'BTC/USDT', 'ETH/EUR').")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' to purchase the base asset, 'sell' to sell it.")],
     amount: Annotated[float, Field(description="The quantity of the base currency to trade (for a market buy, unless 'createMarketBuyOrderRequiresPrice' is False, then it's the quote currency amount for some exchanges like Upbit) or the quantity to sell (for a market sell). Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with trading permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for the CCXT `createOrder` call. "
                                                         "Common uses include `{'clientOrderId': 'your_custom_id'}`. "
                                                         "For market buy orders, some exchanges allow `{'quoteOrderQty': quote_amount}` to specify the amount in quote currency (e.g., spend 100 USDT on BTC). "
@@ -696,8 +741,10 @@ async def create_spot_market_order_tool(
 
         # order = await exchange.createOrder(symbol, 'market', side, amount, params=tool_params)
         return order
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Order creation Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in create_spot_market_order: {str(e)}"}
     finally:
@@ -718,9 +765,9 @@ async def create_futures_limit_order_tool(
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' for a long position, 'sell' for a short position.")],
     amount: Annotated[float, Field(description="The quantity of contracts or base currency to trade. Must be greater than 0.", gt=0)],
     price: Annotated[float, Field(description="The price at which to place the limit order. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with trading permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `createOrder` call AND for client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', 'linear', 'inverse' etc., depending on exchange and contract) to specify market type. "
                                                         "For API call: Common uses include `{'clientOrderId': 'custom_id'}`, `{'postOnly': True}`, `{'reduceOnly': True}`, `{'timeInForce': 'GTC'}`. "
@@ -744,8 +791,10 @@ async def create_futures_limit_order_tool(
         
         order = await exchange.createOrder(symbol, 'limit', side, amount, price, params=tool_params)
         return order
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Order creation Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in create_futures_limit_order: {str(e)}"}
     finally:
@@ -765,9 +814,9 @@ async def create_futures_market_order_tool(
     symbol: Annotated[str, Field(description="The futures/swap contract symbol to trade (e.g., 'BTC/USDT:USDT', 'ETH-PERP'). Format is exchange-specific.")],
     side: Annotated[Literal["buy", "sell"], Field(description="Order side: 'buy' for a long position, 'sell' for a short position.")],
     amount: Annotated[float, Field(description="The quantity of contracts or base currency to trade. Must be greater than 0.", gt=0)],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with trading permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange for trading. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `createOrder` call AND for client instantiation. "
                                                         "CRITICAL for client setup: Include `{'options': {'defaultType': 'future'}}` (or 'swap', etc.) to specify market type. "
                                                         "For API call: Common uses include `{'clientOrderId': 'custom_id'}`, `{'reduceOnly': True}`. "
@@ -792,8 +841,10 @@ async def create_futures_market_order_tool(
         
         order = await exchange.createOrder(symbol, 'market', side, amount, params=tool_params)
         return order
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Order creation Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in create_futures_market_order: {str(e)}"}
     finally:
@@ -811,11 +862,11 @@ async def create_futures_market_order_tool(
 async def cancel_order_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
     id: Annotated[str, Field(description="The order ID (string) of the order to be canceled.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key with trading permissions.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key for the API.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key with trading permissions. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the API. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional/Required: The symbol of the order (e.g., 'BTC/USDT', 'BTC/USDT:USDT'). "
                                                        "Required by some exchanges for `cancelOrder`, optional for others. Check exchange documentation.")] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `cancelOrder` call or for client instantiation. "
                                                         "For client init (if non-spot): `{'options': {'defaultType': 'future'}}` or `{'options': {'defaultType': 'option'}}`. "
                                                         "For API call: Some exchanges might accept `clientOrderId` here if the main `id` is the exchange's ID, or other specific flags. "
@@ -839,8 +890,10 @@ async def cancel_order_tool(
         
         response = await exchange.cancelOrder(id, symbol, params=tool_params)
         return response
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.OrderNotFound) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Cancel order Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in cancel_order: {str(e)}"}
     finally:
@@ -857,12 +910,12 @@ async def cancel_order_tool(
 )
 async def fetch_orders_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'kucoin'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: The symbol (e.g., 'BTC/USDT', 'ETH/USDT:USDT') to fetch orders for. If omitted, orders for all symbols may be returned (exchange-dependent).")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp in milliseconds (UTC epoch) to fetch orders created since this time.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of orders to retrieve. Check exchange for default and maximum limits.", gt=0)] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `fetchOrders` call or for client instantiation. "
                                                         "For client init (if non-spot): `{'options': {'defaultType': 'future'}}`. "
                                                         "For API call: Can be used to filter by order status (e.g., `{'status': 'open'/'closed'/'canceled'}` if supported), order type, or other exchange-specific filters. "
@@ -888,8 +941,10 @@ async def fetch_orders_tool(
         
         orders = await exchange.fetchOrders(symbol, since, limit, params=tool_params)
         return orders
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Fetching orders Not Supported: {str(e)}"}    
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_order_history: {str(e)}"}
     finally:
@@ -906,12 +961,12 @@ async def fetch_orders_tool(
 )
 async def fetch_my_trades_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'ftx'). Case-insensitive.")],
-    api_key: Annotated[Optional[str], Field(description="Your API key.")] = None,
-    secret_key: Annotated[Optional[str], Field(description="Your secret key.")] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key. If not directly provided, the system may use pre-configured credentials. Authentication is required for this operation.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
     symbol: Annotated[Optional[str], Field(description="Optional: The symbol (e.g., 'BTC/USDT', 'BTC/USDT:USDT') to fetch your trades for. If omitted, trades for all symbols may be returned (exchange-dependent).")] = None,
     since: Annotated[Optional[int], Field(description="Optional: Timestamp in milliseconds (UTC epoch) to fetch trades executed since this time.", ge=0)] = None,
     limit: Annotated[Optional[int], Field(description="Optional: Maximum number of trades to retrieve. Check exchange for default and maximum limits.", gt=0)] = None,
-    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange.")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: API passphrase if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT `fetchMyTrades` call or for client instantiation. "
                                                         "For client init (if non-spot): `{'options': {'defaultType': 'future'}}`. "
                                                         "For API call: Can be used for exchange-specific filters like `{'orderId': 'some_order_id'}` to fetch trades for a specific order, or other types of filtering. "
@@ -935,8 +990,10 @@ async def fetch_my_trades_tool(
         
         my_trades = await exchange.fetchMyTrades(symbol, since, limit, params=tool_params)
         return my_trades
-    except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError) as e:
+    except CCXT_GENERAL_EXCEPTIONS as e:
         return {"error": str(e)}
+    except ccxtasync.NotSupported as e:
+        return {"error": f"Fetching trades Not Supported: {str(e)}"}
     except Exception as e:
         return {"error": f"An unexpected error occurred in fetch_my_trade_history: {str(e)}"}
     finally:
