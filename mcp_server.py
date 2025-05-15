@@ -613,9 +613,22 @@ async def create_spot_limit_order_tool(
     try:
         exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['createOrder']:
-            return {"error": f"Exchange '{exchange_id}' does not support createOrder."}
-        
-        order = await exchange.createOrder(symbol, 'limit', side, amount, price, params=tool_params)
+            # Even if createOrder is marked as false, specific order methods might exist.
+            # We'll rely on hasattr for the specific methods.
+            pass
+
+        if side == "buy":
+            if not hasattr(exchange, 'create_limit_buy_order'):
+                return {"error": f"Exchange '{exchange_id}' does not support create_limit_buy_order via a dedicated method. Falling back to createOrder."}
+            order = await exchange.create_limit_buy_order(symbol, amount, price, params=tool_params)
+        elif side == "sell":
+            if not hasattr(exchange, 'create_limit_sell_order'):
+                return {"error": f"Exchange '{exchange_id}' does not support create_limit_sell_order via a dedicated method. Falling back to createOrder."}
+            order = await exchange.create_limit_sell_order(symbol, amount, price, params=tool_params)
+        else:
+            return {"error": f"Invalid side: {side}. Must be 'buy' or 'sell'."}
+            
+        # order = await exchange.createOrder(symbol, 'limit', side, amount, price, params=tool_params)
         return order
     except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
         return {"error": str(e)}
@@ -663,9 +676,24 @@ async def create_spot_market_order_tool(
     try:
         exchange = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
         if not exchange.has['createOrder']:
-            return {"error": f"Exchange '{exchange_id}' does not support createOrder."}
-        
-        order = await exchange.createOrder(symbol, 'market', side, amount, params=tool_params)
+            # Even if createOrder is marked as false, specific order methods might exist.
+            # We'll rely on hasattr for the specific methods.
+            pass
+
+        if side == "buy":
+            if not hasattr(exchange, 'create_market_buy_order'):
+                return {"error": f"Exchange '{exchange_id}' does not support create_market_buy_order via a dedicated method. Falling back to createOrder."}
+            # For market buy, Upbit and some others might require cost in amount and params={'createMarketBuyOrderRequiresPrice': False}
+            # This logic is now expected to be handled by the user via the 'params' argument based on the updated tool description.
+            order = await exchange.create_market_buy_order(symbol, amount, params=tool_params)
+        elif side == "sell":
+            if not hasattr(exchange, 'create_market_sell_order'):
+                return {"error": f"Exchange '{exchange_id}' does not support create_market_sell_order via a dedicated method. Falling back to createOrder."}
+            order = await exchange.create_market_sell_order(symbol, amount, params=tool_params)
+        else:
+            return {"error": f"Invalid side: {side}. Must be 'buy' or 'sell'."}
+
+        # order = await exchange.createOrder(symbol, 'market', side, amount, params=tool_params)
         return order
     except (ccxtasync.NetworkError, ccxtasync.AuthenticationError, ccxtasync.ExchangeNotFound, ccxtasync.NotSupported, ccxtasync.ExchangeError, ValueError, ccxtasync.InsufficientFunds, ccxtasync.InvalidOrder) as e:
         return {"error": str(e)}
