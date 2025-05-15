@@ -5,6 +5,8 @@ import ccxt.async_support as ccxtasync # Changed for asynchronous support and al
 from fastmcp import FastMCP
 import asyncio
 from pydantic import Field
+import pandas as pd # Added for DataFrame manipulation
+import pandas_ta as ta # Added for technical indicators
 
 # --- Constants for CCXT Exception Handling ---
 CCXT_GENERAL_EXCEPTIONS = (
@@ -999,6 +1001,191 @@ async def fetch_my_trades_tool(
     finally:
         if exchange:
             await exchange.close()
+
+@mcp.tool(
+    name="calculate_technical_indicator",
+    description="Fetches OHLCV data for a given symbol and timeframe, then calculates a specified technical indicator "
+                "(e.g., RSI, SMA, EMA, MACD, Bollinger Bands). Returns the latest calculated indicator value(s) "
+                "for the most recent complete candle. Uses pandas-ta library for calculations.",
+    tags={"market_data", "technical_analysis", "indicator", "charting", "RSI", "SMA", "EMA", "MACD", "BBANDS"}
+)
+async def calculate_technical_indicator_tool(
+    exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'upbit'). Case-insensitive.")],
+    symbol: Annotated[str, Field(description="The trading symbol to calculate the indicator for (e.g., 'BTC/USDT', 'ETH/KRW').")],
+    timeframe: Annotated[str, Field(description="The candle timeframe for OHLCV data (e.g., '1m', '5m', '1h', '1d', '1w'). Check exchange for supported timeframes.")],
+    indicator_name: Annotated[Literal["RSI", "SMA", "EMA", "MACD", "BBANDS"], 
+                            Field(description="The name of the technical indicator to calculate. Supported: RSI, SMA, EMA, MACD, BBANDS.")],
+    indicator_params: Annotated[Optional[Dict], Field(
+        description="Dictionary of parameters for the chosen indicator. All parameters are optional and have defaults. Examples: "
+                    "For RSI: {'length': 14, 'price_source': 'close'}. "
+                    "For SMA/EMA: {'length': 20, 'price_source': 'close'}. "
+                    "For MACD: {'fast': 12, 'slow': 26, 'signal': 9, 'price_source': 'close'}. "
+                    "For BBANDS (Bollinger Bands): {'length': 20, 'std': 2.0, 'price_source': 'close'}. "
+                    "To fetch a specific number of candles for calculation, include {'ohlcv_limit': N} (default: 200). "
+                    "Valid 'price_source' values: 'open', 'high', 'low', 'close' (default), 'hlc3', 'ohlc4'."
+    )] = None,
+    api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
+    secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
+    passphrase: Annotated[Optional[str], Field(description="Optional: Your API passphrase, if required by the exchange. Used with an API key if authentication is performed and the exchange requires it (whether keys are provided directly or pre-configured).")] = None,
+    params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT client instantiation when fetching OHLCV data, "
+                                                        "e.g., `{'options': {'defaultType': 'future'}}` if fetching for non-spot markets like futures.")] = None
+) -> Dict:
+    """Internal use: Fetches OHLCV, calculates specified indicator using pandas-ta, and returns the latest value(s)."""
+    
+    indicator_params_dict = indicator_params.copy() if indicator_params else {}
+    ohlcv_fetch_limit = indicator_params_dict.pop('ohlcv_limit', 200) # Default candles to fetch for indicator calculation
+    price_source_col = indicator_params_dict.pop('price_source', 'close').lower()
+
+    valid_price_sources = ['open', 'high', 'low', 'close', 'hlc3', 'ohlc4']
+    if price_source_col not in valid_price_sources and not (price_source_col == 'volume'): # volume is a valid column but not typical price source
+        return {"error": f"Invalid 'price_source': {price_source_col}. Must be one of {valid_price_sources}."}
+
+    # --- 1. Fetch OHLCV data ---
+    ohlcv_data = []
+    exchange_instance: Optional[ccxtasync.Exchange] = None
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
+    client_config_options = params.pop('options', None) if params else None
+    
+    try:
+        exchange_instance = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
+        if not exchange_instance.has['fetchOHLCV']:
+            return {"error": f"Exchange '{exchange_id}' does not support fetchOHLCV."}
+        
+        # Calculate `since` to get roughly `ohlcv_fetch_limit` candles
+        # This is an approximation as exchanges might have gaps or different return limits
+        timeframe_duration_ms = exchange_instance.parse_timeframe(timeframe) * 1000
+        since_timestamp = exchange_instance.milliseconds() - timeframe_duration_ms * (ohlcv_fetch_limit + 5) # Fetch a bit more to be safe
+        
+        ohlcv_data = await exchange_instance.fetchOHLCV(symbol, timeframe, since=since_timestamp, limit=ohlcv_fetch_limit, params=params)
+        if not ohlcv_data:
+            return {"error": f"No OHLCV data returned for {symbol} on {exchange_id} with timeframe {timeframe}."}
+
+    except CCXT_GENERAL_EXCEPTIONS as e:
+        return {"error": f"CCXT Error fetching OHLCV for {indicator_name} on {symbol}: {str(e)}"}
+    except ccxtasync.NotSupported as e:
+         return {"error": f"fetchOHLCV operation Not Supported by {exchange_id}: {str(e)}"}
+    except Exception as e:
+        return {"error": f"Unexpected error fetching OHLCV for {indicator_name} on {symbol}: {str(e)}"}
+    finally:
+        if exchange_instance:
+            await exchange_instance.close()
+
+    # --- 2. Convert to Pandas DataFrame ---
+    if not ohlcv_data:
+        return {"error": "Failed to fetch OHLCV data, or no data available for the period."}
+        
+    df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    if df.empty:
+        return {"error": "OHLCV data was empty after converting to DataFrame."}
+    
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+
+    # Ensure numeric types for calculation columns
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df.dropna(subset=['open', 'high', 'low', 'close'], inplace=True) # Drop rows where essential price data is missing
+
+    if df.empty:
+        return {"error": "OHLCV data became empty after cleaning (e.g., all rows had missing price data)."}
+
+    # Handle hlc3 and ohlc4 as price_source if specified
+    if price_source_col == 'hlc3':
+        df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
+    elif price_source_col == 'ohlc4':
+        df['ohlc4'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+    
+    if price_source_col not in df.columns:
+        return {"error": f"Specified 'price_source' column '{price_source_col}' could not be found or derived in the OHLCV data."}
+    if df[price_source_col].isnull().all():
+         return {"error": f"The 'price_source' column '{price_source_col}' contains all NaN values after processing."}
+
+    # --- 3. Calculate Technical Indicator using pandas_ta ---
+    latest_indicator_output = {
+        "indicator_name": indicator_name,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "candle_timestamp_ms": int(df.index[-1].value / 10**6) # Timestamp of the last candle used
+    }
+
+    try:
+        if indicator_name == "RSI":
+            length = indicator_params_dict.get('length', 14)
+            df.ta.rsi(length=length, close=df[price_source_col], append=True) # Appends as RSI_length
+            rsi_col_name = f'RSI_{length}'
+            if rsi_col_name not in df.columns or pd.isna(df[rsi_col_name].iloc[-1]):
+                return {"error": f"Could not calculate {indicator_name} for {symbol}. Check data or parameters (length: {length}). Latest value is NaN."}
+            latest_indicator_output["value"] = round(df[rsi_col_name].iloc[-1], 4)
+
+        elif indicator_name in ["SMA", "EMA"]:
+            length = indicator_params_dict.get('length', 20)
+            if indicator_name == "SMA":
+                df.ta.sma(length=length, close=df[price_source_col], append=True) # Appends as SMA_length
+                col_name = f'SMA_{length}'
+            else: # EMA
+                df.ta.ema(length=length, close=df[price_source_col], append=True) # Appends as EMA_length
+                col_name = f'EMA_{length}'
+            if col_name not in df.columns or pd.isna(df[col_name].iloc[-1]):
+                return {"error": f"Could not calculate {indicator_name} for {symbol}. Check data or parameters (length: {length}). Latest value is NaN."}
+            latest_indicator_output["value"] = round(df[col_name].iloc[-1], 4)
+
+        elif indicator_name == "MACD":
+            fast = indicator_params_dict.get('fast', 12)
+            slow = indicator_params_dict.get('slow', 26)
+            signal_p = indicator_params_dict.get('signal', 9) # Renamed to avoid conflict with signal module
+            # pandas-ta appends columns like MACD_fast_slow_signal, MACDh_fast_slow_signal, MACDs_fast_slow_signal
+            df.ta.macd(fast=fast, slow=slow, signal=signal_p, close=df[price_source_col], append=True)
+            macd_line_col = f'MACD_{fast}_{slow}_{signal_p}'
+            signal_line_col = f'MACDs_{fast}_{slow}_{signal_p}'
+            hist_col = f'MACDh_{fast}_{slow}_{signal_p}'
+            
+            if not all(col in df.columns for col in [macd_line_col, signal_line_col, hist_col]) or \
+               pd.isna(df[macd_line_col].iloc[-1]) or \
+               pd.isna(df[signal_line_col].iloc[-1]) or \
+               pd.isna(df[hist_col].iloc[-1]):
+                return {"error": f"Could not calculate {indicator_name} components for {symbol}. Check data or parameters. One or more latest values are NaN."}
+            latest_indicator_output["values"] = {
+                "macd": round(df[macd_line_col].iloc[-1], 4),
+                "signal": round(df[signal_line_col].iloc[-1], 4),
+                "histogram": round(df[hist_col].iloc[-1], 4)
+            }
+
+        elif indicator_name == "BBANDS":
+            length = indicator_params_dict.get('length', 20)
+            std = indicator_params_dict.get('std', 2.0) # Ensure std is float for pandas-ta naming
+            # pandas-ta appends BBL_length_std, BBM_length_std, BBU_length_std, BBB_length_std, BBP_length_std
+            df.ta.bbands(length=length, std=std, close=df[price_source_col], append=True)
+            # Ensure stddev in column name matches pandas-ta (e.g., 2.0 not 2)
+            std_str = f"{std:.1f}" 
+            lower_col = f'BBL_{length}_{std_str}'
+            middle_col = f'BBM_{length}_{std_str}'
+            upper_col = f'BBU_{length}_{std_str}'
+
+            if not all(col in df.columns for col in [lower_col, middle_col, upper_col]) or \
+               pd.isna(df[lower_col].iloc[-1]) or \
+               pd.isna(df[middle_col].iloc[-1]) or \
+               pd.isna(df[upper_col].iloc[-1]):
+                return {"error": f"Could not calculate {indicator_name} components for {symbol}. Check data or parameters. One or more latest values are NaN."}
+            latest_indicator_output["values"] = {
+                "lower": round(df[lower_col].iloc[-1], 4),
+                "middle": round(df[middle_col].iloc[-1], 4),
+                "upper": round(df[upper_col].iloc[-1], 4)
+            }
+        else:
+            # This case should ideally not be reached if Literal for indicator_name is exhaustive
+            return {"error": f"Indicator '{indicator_name}' is not supported by this tool implementation."}
+
+        return latest_indicator_output
+
+    except KeyError as ke:
+        return {"error": f"Pandas-ta column naming issue or missing expected column for {indicator_name}: {str(ke)}. Ensure OHLCV data has correct columns (open, high, low, close, volume)."}
+    except Exception as e:
+        return {"error": f"Error during {indicator_name} calculation for {symbol}: {str(e)}"}
 
 # --- Main execution (for running the server) ---
 if __name__ == "__main__":

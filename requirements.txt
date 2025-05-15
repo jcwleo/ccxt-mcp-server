@@ -1,3 +1,5 @@
 fastmcp
 ccxt
-pydantic 
+pydantic
+pandas
+pandas-ta 
