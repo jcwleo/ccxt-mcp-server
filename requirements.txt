@@ -2,4 +2,3 @@ fastmcp
 ccxt
 pydantic
 pandas
-pandas-ta 

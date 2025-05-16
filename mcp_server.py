@@ -1,36 +1,198 @@
 # mcp_server.py
 
+import json
 from typing import Optional, List, Union, Dict, Annotated, Literal
 import ccxt.async_support as ccxtasync # Changed for asynchronous support and alias
 from fastmcp import FastMCP
 import asyncio
 from pydantic import Field
 import pandas as pd # Added for DataFrame manipulation
-import pandas_ta as ta # Added for technical indicators
 
 # --- Constants for CCXT Exception Handling ---
 CCXT_GENERAL_EXCEPTIONS = (
     ccxtasync.AuthenticationError, # Covers PermissionDenied, AccountNotEnabled, AccountSuspended
     ccxtasync.ArgumentsRequired,
     ccxtasync.BadRequest,          # Covers BadSymbol
-    ccxtasync.OperationRejected,   # Covers NoChange, MarginModeAlreadySet, MarketClosed, ManualInteractionNeeded
     ccxtasync.InsufficientFunds,
     ccxtasync.InvalidAddress,      # Covers AddressPending
     ccxtasync.InvalidOrder,        # Covers OrderNotFound, OrderNotCached, etc.
-    # NotSupported is handled specifically in some tools or can be added here if generally handled.
-    ccxtasync.InvalidProxySettings,
-    ccxtasync.ExchangeClosedByUser,
+    # NotSupported is handled specif
     ccxtasync.NetworkError,        # Covers DDoSProtection, RateLimitExceeded, ExchangeNotAvailable, InvalidNonce, RequestTimeout, OnMaintenance, ChecksumError
     ccxtasync.BadResponse,         # Covers NullResponse
     ccxtasync.CancelPending,
-    ccxtasync.ExchangeNotFound,    # Specific error from ccxtasync for non-existent exchange_id
-    ccxtasync.UnsubscribeError,    # Less common for REST but for completeness
     ccxtasync.ExchangeError,       # General ccxt exchange error, placed after more specific ones
     ValueError
 )
+TimeframeLiteral = Literal[
+    '1m', '3m', '5m', '15m', '30m', 
+    '1h', '2h', '4h', '6h', '8h', '12h', 
+    '1d', '3d', '1w', '1M'
+]
 
 # Initialize FastMCP
 mcp = FastMCP("CCXT MCP Server 🚀")
+
+import pandas as pd
+from typing import Dict, Optional, Tuple
+
+def compute_rsi(df: pd.DataFrame, length: int = 14, price_source: str = 'close') -> Optional[pd.Series]:
+    """Calculates Relative Strength Index (RSI) using pandas.
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        length: The period for RSI calculation.
+        price_source: The DataFrame column to use for price (e.g., 'close', 'hlc3').
+    Returns:
+        Pandas Series with RSI values, or None if calculation fails.
+    """
+    if price_source not in df.columns:
+        raise ValueError(f"Price source column '{price_source}' not found in DataFrame.")
+    if df[price_source].isnull().all():
+        # print(f"Warning: Price source column '{price_source}' for RSI is all NaN.")
+        return None
+    try:
+        delta = df[price_source].diff(1)
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+
+        # Calculate initial average gain and loss using SMA for the first period
+        avg_gain = gain.rolling(window=length, min_periods=length).mean()
+        avg_loss = loss.rolling(window=length, min_periods=length).mean()
+
+        # For subsequent periods, use Wilder's smoothing method (equivalent to EMA with alpha = 1/length)
+        # For pandas EWM, alpha = 2 / (span + 1), so span = (2 / alpha) - 1 = 2*length - 1
+        # However, it's more direct to use the recursive formula after the first value.
+        
+        # Fill NaN for the first `length` periods because rolling mean needs `length` values
+        # For the very first RSI value, avg_gain and avg_loss are simple averages.
+        # Subsequent values are smoothed.
+
+        for i in range(length, len(df)):
+            avg_gain.iloc[i] = (avg_gain.iloc[i-1] * (length - 1) + gain.iloc[i]) / length
+            avg_loss.iloc[i] = (avg_loss.iloc[i-1] * (length - 1) + loss.iloc[i]) / length
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        # RSI can be NaN if avg_loss is 0.
+        # If avg_loss is 0 and avg_gain is also 0, rs is NaN, rsi is NaN.
+        # If avg_loss is 0 and avg_gain is > 0, rs is inf, 100 / (1 + inf) is 0, so RSI is 100.
+        # To maintain consistency with other indicators that have initial NaNs,
+        # we will let NaNs propagate and handle them during the first_valid_index logic.
+        # rsi.fillna(100, inplace=True) # Removed: Let initial NaNs remain
+        # rsi[avg_loss == 0] = 100 # Removed for consistency, will be NaN if rs is NaN or inf if avg_loss is 0.
+                                  # Or, if we want to be strict to definition:
+        rsi.loc[avg_loss == 0] = 100.0 # Set to 100 where avg_loss is 0 and avg_gain > 0 (rs is inf)
+        # If both are 0, rs is nan, rsi remains nan. This is fine.
+        
+        return rsi
+
+    except Exception as e:
+        print(f"Error calculating RSI: {e}")
+        return None
+
+def compute_sma(df: pd.DataFrame, length: int = 20, price_source: str = 'close') -> Optional[pd.Series]:
+    """Calculates Simple Moving Average (SMA) using pandas.
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        length: The period for SMA calculation.
+        price_source: The DataFrame column to use for price (e.g., 'close', 'hlc3').
+    Returns:
+        Pandas Series with SMA values, or None if calculation fails.
+    """
+    if price_source not in df.columns:
+        raise ValueError(f"Price source column '{price_source}' not found in DataFrame.")
+    if df[price_source].isnull().all():
+        # print(f"Warning: Price source column '{price_source}' for SMA is all NaN.")
+        return None
+    try:
+        sma_series = df[price_source].rolling(window=length, min_periods=length).mean()
+        return sma_series
+    except Exception as e:
+        print(f"Error calculating SMA: {e}")
+        return None
+
+def compute_ema(df: pd.DataFrame, length: int = 20, price_source: str = 'close') -> Optional[pd.Series]:
+    """Calculates Exponential Moving Average (EMA) using pandas.
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        length: The span for EMA calculation.
+        price_source: The DataFrame column to use for price (e.g., 'close', 'hlc3').
+    Returns:
+        Pandas Series with EMA values, or None if calculation fails.
+    """
+    if price_source not in df.columns:
+        raise ValueError(f"Price source column '{price_source}' not found in DataFrame.")
+    if df[price_source].isnull().all():
+        # print(f"Warning: Price source column '{price_source}' for EMA is all NaN.")
+        return None
+    try:
+        ema_series = df[price_source].ewm(span=length, adjust=False, min_periods=length).mean()
+        return ema_series
+    except Exception as e:
+        print(f"Error calculating EMA: {e}")
+        return None
+
+def compute_macd(
+    df: pd.DataFrame, 
+    fast_length: int = 12, 
+    slow_length: int = 26, 
+    signal_length: int = 9, 
+    price_source: str = 'close'
+) -> Optional[Tuple[pd.Series, pd.Series, pd.Series]]:
+    """Calculates Moving Average Convergence Divergence (MACD) using pandas.
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        fast_length: The period for the fast EMA.
+        slow_length: The period for the slow EMA.
+        signal_length: The period for the signal line EMA.
+        price_source: The DataFrame column to use for price.
+    Returns:
+        A tuple of (macd_line, signal_line, histogram), or None if calculation fails.
+    """
+    if price_source not in df.columns:
+        raise ValueError(f"Price source column '{price_source}' not found in DataFrame.")
+
+    try:
+        ema_fast = df[price_source].ewm(span=fast_length, adjust=False, min_periods=fast_length).mean()
+        ema_slow = df[price_source].ewm(span=slow_length, adjust=False, min_periods=slow_length).mean()
+        
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal_length, adjust=False, min_periods=signal_length).mean()
+        histogram = macd_line - signal_line
+        
+        return macd_line, signal_line, histogram
+    except Exception as e:
+        print(f"Error calculating MACD: {e}")
+        return None
+
+def compute_bbands(
+    df: pd.DataFrame, 
+    length: int = 20, 
+    std_dev: float = 2.0, 
+    price_source: str = 'close'
+) -> Optional[Tuple[pd.Series, pd.Series, pd.Series]]:
+    """Calculates Bollinger Bands (BBANDS) using pandas.
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        length: The period for the middle band (SMA) and standard deviation.
+        std_dev: The number of standard deviations for the upper and lower bands.
+        price_source: The DataFrame column to use for price.
+    Returns:
+        A tuple of (lower_band, middle_band, upper_band), or None if calculation fails.
+    """
+    if price_source not in df.columns:
+        raise ValueError(f"Price source column '{price_source}' not found in DataFrame.")
+
+    try:
+        middle_band = df[price_source].rolling(window=length, min_periods=length).mean()
+        rolling_std = df[price_source].rolling(window=length, min_periods=length).std()
+        
+        upper_band = middle_band + (rolling_std * std_dev)
+        lower_band = middle_band - (rolling_std * std_dev)
+        
+        return lower_band, middle_band, upper_band
+    except Exception as e:
+        print(f"Error calculating BBANDS: {e}")
+        return None 
 
 # --- Helper Function to Initialize CCXT Exchange ---
 async def get_exchange_instance(
@@ -1002,27 +1164,258 @@ async def fetch_my_trades_tool(
         if exchange:
             await exchange.close()
 
+# --- 기술적 지표 계산 도구 (리팩토링) ---
+# 파라미터 파싱 헬퍼 함수
+def parse_indicator_params(indicator_params):
+    """지표 파라미터를 파싱하는 함수"""
+    parsed_params_dict = {}
+    if indicator_params and isinstance(indicator_params, str):
+        try:
+            parsed_params_dict = json.loads(indicator_params)
+        except json.JSONDecodeError:
+            # 에러 처리는 상위 함수에서 함
+            pass
+    elif isinstance(indicator_params, dict):
+        parsed_params_dict = indicator_params
+    return parsed_params_dict
+
+# OHLCV 데이터 가져오기
+async def fetch_ohlcv_data(exchange_id, symbol, timeframe, limit, api_key=None, secret_key=None, passphrase=None, params=None):
+    """지정된 거래소에서 OHLCV 데이터를 가져오는 함수"""
+    api_key_info_dict = None
+    if api_key and secret_key:
+        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
+        if passphrase:
+            api_key_info_dict['password'] = passphrase
+            
+    fetch_params = params.copy() if params else {}
+    client_config_options = fetch_params.pop('options', None) 
+
+    exchange_instance = None
+    try:
+        exchange_instance = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
+        if not exchange_instance.has['fetchOHLCV']:
+            return None, f"Exchange '{exchange_id}' does not support fetchOHLCV."
+        
+        ohlcv_data = await exchange_instance.fetchOHLCV(symbol, timeframe, limit=limit, params=fetch_params)
+        if not ohlcv_data:
+            return None, f"No OHLCV data returned for {symbol} on {exchange_id} with timeframe {timeframe}."
+        
+        return ohlcv_data, None
+    except CCXT_GENERAL_EXCEPTIONS as e:
+        return None, f"CCXT Error: {str(e)}"
+    except ccxtasync.NotSupported as e:
+        return None, f"Operation Not Supported: {str(e)}"
+    except Exception as e:
+        return None, f"Unexpected error: {str(e)}"
+    finally:
+        if exchange_instance:
+            await exchange_instance.close()
+
+# 데이터프레임 준비 함수
+def prepare_dataframe(ohlcv_data, price_source_col):
+    """OHLCV 데이터를 DataFrame으로 변환하고 가공하는 함수"""
+    if not ohlcv_data:
+        return None, "Failed to fetch OHLCV data, or no data available for the period."
+        
+    df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    if df.empty:
+        return None, "OHLCV data was empty after converting to DataFrame."
+    
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df.dropna(subset=['open', 'high', 'low', 'close'], inplace=True)
+
+    if df.empty:
+        return None, "OHLCV data became empty after cleaning."
+
+    if price_source_col == 'hlc3':
+        df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
+    elif price_source_col == 'ohlc4':
+        df['ohlc4'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+    
+    if price_source_col not in df.columns:
+        return None, f"Specified 'price_source' column '{price_source_col}' could not be found or derived."
+    if df[price_source_col].isnull().all():
+        return None, f"The 'price_source' column '{price_source_col}' contains all NaN values."
+        
+    return df, None
+
+# 시리즈 처리 공통 로직
+def process_indicator_series(series, limit):
+    """시리즈 데이터를 처리하는 공통 함수"""
+    if series is None or series.empty:
+        return pd.Series(dtype=float)
+        
+    first_idx = series.first_valid_index()
+    if first_idx is None:
+        return pd.Series(dtype=float)
+        
+    return series.loc[first_idx:].tail(limit)
+
+# 결과 포맷팅 함수들
+def timestamp_to_iso(timestamp):
+    """Pandas 타임스탬프를 ISO 8601 형식 문자열로 변환"""
+    # 밀리초를 제외한 ISO 형식 문자열 변환
+    return timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+def format_series_to_list(series, name):
+    """단일 시리즈를 리스트로 변환하는 함수"""
+    if series is None or series.empty:
+        return []
+    return [
+        {"datetime": timestamp_to_iso(idx), name: round(val, 4) if pd.notnull(val) else None}
+        for idx, val in series.items()
+    ]
+
+def format_macd_to_list(macd_line, signal_line, histogram):
+    """MACD 시리즈를 리스트로 변환하는 함수"""
+    if macd_line is None or signal_line is None or histogram is None:
+        return []
+    
+    results = []
+    for i in range(len(macd_line)):
+        results.append({
+            "datetime": timestamp_to_iso(macd_line.index[i]),
+            "macd": round(macd_line.iloc[i], 4) if pd.notnull(macd_line.iloc[i]) else None,
+            "signal": round(signal_line.iloc[i], 4) if pd.notnull(signal_line.iloc[i]) else None,
+            "histogram": round(histogram.iloc[i], 4) if pd.notnull(histogram.iloc[i]) else None,
+        })
+    return results
+
+def format_bbands_to_list(lower, middle, upper):
+    """볼린저밴드 시리즈를 리스트로 변환하는 함수"""
+    if lower is None or middle is None or upper is None:
+        return []
+    
+    results = []
+    for i in range(len(middle)):
+        results.append({
+            "datetime": timestamp_to_iso(middle.index[i]),
+            "lower": round(lower.iloc[i], 4) if pd.notnull(lower.iloc[i]) else None,
+            "middle": round(middle.iloc[i], 4) if pd.notnull(middle.iloc[i]) else None,
+            "upper": round(upper.iloc[i], 4) if pd.notnull(upper.iloc[i]) else None,
+        })
+    return results
+
+# 지표 계산 함수들
+def calculate_rsi_indicator(df, params, limit, price_source):
+    """RSI 지표를 계산하는 함수"""
+    length = params.get('length', 14)
+    
+    try:
+        calculated_indicator = compute_rsi(df, length=length, price_source=price_source)
+        if calculated_indicator is None or calculated_indicator.empty:
+            return None, f"RSI 계산 결과가 비어 있습니다. (length: {length})"
+            
+        processed_series = process_indicator_series(calculated_indicator, limit)
+        return processed_series, None
+    except Exception as e:
+        return None, f"RSI 계산 중 오류 발생: {str(e)}"
+
+def calculate_sma_indicator(df, params, limit, price_source):
+    """SMA 지표를 계산하는 함수"""
+    length = params.get('length', 20)
+    
+    try:
+        calculated_indicator = compute_sma(df, length=length, price_source=price_source)
+        if calculated_indicator is None or calculated_indicator.empty:
+            return None, f"SMA 계산 결과가 비어 있습니다. (length: {length})"
+            
+        processed_series = process_indicator_series(calculated_indicator, limit)
+        return processed_series, None
+    except Exception as e:
+        return None, f"SMA 계산 중 오류 발생: {str(e)}"
+
+def calculate_ema_indicator(df, params, limit, price_source):
+    """EMA 지표를 계산하는 함수"""
+    length = params.get('length', 20)
+    
+    try:
+        calculated_indicator = compute_ema(df, length=length, price_source=price_source)
+        if calculated_indicator is None or calculated_indicator.empty:
+            return None, f"EMA 계산 결과가 비어 있습니다. (length: {length})"
+            
+        processed_series = process_indicator_series(calculated_indicator, limit)
+        return processed_series, None
+    except Exception as e:
+        return None, f"EMA 계산 중 오류 발생: {str(e)}"
+
+def calculate_macd_indicator(df, params, limit, price_source):
+    """MACD 지표를 계산하는 함수"""
+    fast_length = params.get('fast', 12)
+    slow_length = params.get('slow', 26)
+    signal_length = params.get('signal', 9)
+    
+    try:
+        macd_result = compute_macd(
+            df, 
+            fast_length=fast_length, 
+            slow_length=slow_length, 
+            signal_length=signal_length, 
+            price_source=price_source
+        )
+        
+        if macd_result is None:
+            return None, f"MACD 계산 결과가 비어 있습니다."
+            
+        macd_line, signal_line, histogram = macd_result
+        
+        # 각 시리즈 처리
+        processed_macd = process_indicator_series(macd_line, limit)
+        processed_signal = process_indicator_series(signal_line, limit)
+        processed_hist = process_indicator_series(histogram, limit)
+        
+        return (processed_macd, processed_signal, processed_hist), None
+    except Exception as e:
+        return None, f"MACD 계산 중 오류 발생: {str(e)}"
+
+def calculate_bbands_indicator(df, params, limit, price_source):
+    """볼린저밴드 지표를 계산하는 함수"""
+    length = params.get('length', 20)
+    std_dev = params.get('std', 2.0)
+    
+    try:
+        bbands_result = compute_bbands(
+            df, 
+            length=length, 
+            std_dev=std_dev, 
+            price_source=price_source
+        )
+        
+        if bbands_result is None:
+            return None, f"볼린저밴드 계산 결과가 비어 있습니다."
+            
+        lower_band, middle_band, upper_band = bbands_result
+        
+        # 각 시리즈 처리
+        processed_lower = process_indicator_series(lower_band, limit)
+        processed_middle = process_indicator_series(middle_band, limit)
+        processed_upper = process_indicator_series(upper_band, limit)
+        
+        return (processed_lower, processed_middle, processed_upper), None
+    except Exception as e:
+        return None, f"볼린저밴드 계산 중 오류 발생: {str(e)}"
+
 @mcp.tool(
     name="calculate_technical_indicator",
     description="Fetches OHLCV data for a given symbol and timeframe, then calculates a specified technical indicator "
-                "(e.g., RSI, SMA, EMA, MACD, Bollinger Bands). Returns the latest calculated indicator value(s) "
-                "for the most recent complete candle. Uses pandas-ta library for calculations.",
+                "(e.g., RSI, SMA, EMA, MACD, Bollinger Bands). Returns a time series of calculated indicator values. "
+                "The number of data points returned corresponds to the OHLCV data fetched (controlled by 'ohlcv_limit' in indicator_params).",
     tags={"market_data", "technical_analysis", "indicator", "charting", "RSI", "SMA", "EMA", "MACD", "BBANDS"}
 )
 async def calculate_technical_indicator_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'upbit'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The trading symbol to calculate the indicator for (e.g., 'BTC/USDT', 'ETH/KRW').")],
-    timeframe: Annotated[str, Field(description="The candle timeframe for OHLCV data (e.g., '1m', '5m', '1h', '1d', '1w'). Check exchange for supported timeframes.")],
+    timeframe: Annotated[TimeframeLiteral, Field(description="The candle timeframe for OHLCV data. Common supported values are provided. Always check the specific exchange's documentation for their full list of supported timeframes as it can vary.")],
     indicator_name: Annotated[Literal["RSI", "SMA", "EMA", "MACD", "BBANDS"], 
                             Field(description="The name of the technical indicator to calculate. Supported: RSI, SMA, EMA, MACD, BBANDS.")],
-    indicator_params: Annotated[Optional[Dict], Field(
-        description="Dictionary of parameters for the chosen indicator. All parameters are optional and have defaults. Examples: "
-                    "For RSI: {'length': 14, 'price_source': 'close'}. "
-                    "For SMA/EMA: {'length': 20, 'price_source': 'close'}. "
-                    "For MACD: {'fast': 12, 'slow': 26, 'signal': 9, 'price_source': 'close'}. "
-                    "For BBANDS (Bollinger Bands): {'length': 20, 'std': 2.0, 'price_source': 'close'}. "
-                    "To fetch a specific number of candles for calculation, include {'ohlcv_limit': N} (default: 200). "
-                    "Valid 'price_source' values: 'open', 'high', 'low', 'close' (default), 'hlc3', 'ohlc4'."
+    ohlcv_limit: Annotated[Optional[int], Field(description="Optional: The number of OHLCV data points to fetch. Default is 50. Check exchange for default and maximum limits.", gt=0)] = None,
+    indicator_params: Annotated[Optional[str], Field(
+        description='''Optional: A JSON string representing a dictionary of parameters for the chosen indicator. All parameters within the dictionary are optional and have defaults. Example JSON string for RSI: {"length": 14, "price_source": "close"}. Parameter details for the dictionary: For RSI: {'length': 14, 'price_source': 'close'}. For SMA/EMA: {'length': 20, 'price_source': 'close'}. For MACD: {'fast': 12, 'slow': 26, 'signal': 9, 'price_source': 'close'}. For BBANDS (Bollinger Bands): {'length': 20, 'std': 2.0, 'price_source': 'close'}. Valid 'price_source' values: 'open', 'high', 'low', 'close' (default), 'hlc3', 'ohlc4'. Ensure the JSON string is correctly formatted.'''
     )] = None,
     api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
     secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
@@ -1030,164 +1423,125 @@ async def calculate_technical_indicator_tool(
     params: Annotated[Optional[Dict], Field(description="Optional: Extra parameters for CCXT client instantiation when fetching OHLCV data, "
                                                         "e.g., `{'options': {'defaultType': 'future'}}` if fetching for non-spot markets like futures.")] = None
 ) -> Dict:
-    """Internal use: Fetches OHLCV, calculates specified indicator using pandas-ta, and returns the latest value(s)."""
+    """기술적 지표를 계산하는 함수 (리팩토링 버전)"""
     
-    indicator_params_dict = indicator_params.copy() if indicator_params else {}
-    ohlcv_fetch_limit = indicator_params_dict.pop('ohlcv_limit', 200) # Default candles to fetch for indicator calculation
-    price_source_col = indicator_params_dict.pop('price_source', 'close').lower()
-
+    # 1. 파라미터 파싱 및 검증
+    parsed_params = parse_indicator_params(indicator_params)
+    
+    # 요청된 최종 데이터 길이 결정
+    requested_final_length = ohlcv_limit or parsed_params.get('ohlcv_limit', 50)
+    if not isinstance(requested_final_length, int) or requested_final_length <= 0:
+        requested_final_length = 50
+    
+    # 실제 OHLCV 데이터 가져올 길이 (계산용 버퍼 추가)
+    ohlcv_fetch_limit = requested_final_length + 100
+    
+    # 가격 소스 컬럼 결정
+    price_source_col = parsed_params.get('price_source', 'close').lower()
     valid_price_sources = ['open', 'high', 'low', 'close', 'hlc3', 'ohlc4']
-    if price_source_col not in valid_price_sources and not (price_source_col == 'volume'): # volume is a valid column but not typical price source
-        return {"error": f"Invalid 'price_source': {price_source_col}. Must be one of {valid_price_sources}."}
-
-    # --- 1. Fetch OHLCV data ---
-    ohlcv_data = []
-    exchange_instance: Optional[ccxtasync.Exchange] = None
-    api_key_info_dict = None
-    if api_key and secret_key:
-        api_key_info_dict = {'apiKey': api_key, 'secret': secret_key}
-        if passphrase:
-            api_key_info_dict['password'] = passphrase
-            
-    client_config_options = params.pop('options', None) if params else None
+    if price_source_col not in valid_price_sources:
+        return {"error": f"잘못된 'price_source': {price_source_col}. 다음 중 하나여야 합니다: {valid_price_sources}."}
     
-    try:
-        exchange_instance = await get_exchange_instance(exchange_id, api_key_info=api_key_info_dict, exchange_config_options=client_config_options)
-        if not exchange_instance.has['fetchOHLCV']:
-            return {"error": f"Exchange '{exchange_id}' does not support fetchOHLCV."}
-        
-        # Calculate `since` to get roughly `ohlcv_fetch_limit` candles
-        # This is an approximation as exchanges might have gaps or different return limits
-        timeframe_duration_ms = exchange_instance.parse_timeframe(timeframe) * 1000
-        since_timestamp = exchange_instance.milliseconds() - timeframe_duration_ms * (ohlcv_fetch_limit + 5) # Fetch a bit more to be safe
-        
-        ohlcv_data = await exchange_instance.fetchOHLCV(symbol, timeframe, since=since_timestamp, limit=ohlcv_fetch_limit, params=params)
-        if not ohlcv_data:
-            return {"error": f"No OHLCV data returned for {symbol} on {exchange_id} with timeframe {timeframe}."}
-
-    except CCXT_GENERAL_EXCEPTIONS as e:
-        return {"error": f"CCXT Error fetching OHLCV for {indicator_name} on {symbol}: {str(e)}"}
-    except ccxtasync.NotSupported as e:
-         return {"error": f"fetchOHLCV operation Not Supported by {exchange_id}: {str(e)}"}
-    except Exception as e:
-        return {"error": f"Unexpected error fetching OHLCV for {indicator_name} on {symbol}: {str(e)}"}
-    finally:
-        if exchange_instance:
-            await exchange_instance.close()
-
-    # --- 2. Convert to Pandas DataFrame ---
-    if not ohlcv_data:
-        return {"error": "Failed to fetch OHLCV data, or no data available for the period."}
-        
-    df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    if df.empty:
-        return {"error": "OHLCV data was empty after converting to DataFrame."}
+    # 2. OHLCV 데이터 가져오기
+    ohlcv_data, fetch_error = await fetch_ohlcv_data(
+        exchange_id, symbol, timeframe, ohlcv_fetch_limit, 
+        api_key, secret_key, passphrase, params
+    )
     
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-
-    # Ensure numeric types for calculation columns
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df.dropna(subset=['open', 'high', 'low', 'close'], inplace=True) # Drop rows where essential price data is missing
-
-    if df.empty:
-        return {"error": "OHLCV data became empty after cleaning (e.g., all rows had missing price data)."}
-
-    # Handle hlc3 and ohlc4 as price_source if specified
-    if price_source_col == 'hlc3':
-        df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
-    elif price_source_col == 'ohlc4':
-        df['ohlc4'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+    if fetch_error:
+        return {"error": fetch_error}
     
-    if price_source_col not in df.columns:
-        return {"error": f"Specified 'price_source' column '{price_source_col}' could not be found or derived in the OHLCV data."}
-    if df[price_source_col].isnull().all():
-         return {"error": f"The 'price_source' column '{price_source_col}' contains all NaN values after processing."}
-
-    # --- 3. Calculate Technical Indicator using pandas_ta ---
-    latest_indicator_output = {
+    # 3. 데이터프레임 준비
+    df, df_error = prepare_dataframe(ohlcv_data, price_source_col)
+    if df_error:
+        return {"error": df_error}
+    
+    # 4. 실제 파라미터 사용값 기록 (결과에 포함시키기 위함)
+    actual_params_used = parsed_params.copy()
+    actual_params_used['ohlcv_limit'] = requested_final_length
+    actual_params_used['price_source'] = price_source_col
+    
+    # 5. 지표 계산 및 결과 생성
+    indicator_output = {
         "indicator_name": indicator_name,
         "symbol": symbol,
         "timeframe": timeframe,
-        "candle_timestamp_ms": int(df.index[-1].value / 10**6) # Timestamp of the last candle used
+        "params_used": actual_params_used,
+        "price_source_used": price_source_col,
+        "data": []
     }
-
+    
     try:
         if indicator_name == "RSI":
-            length = indicator_params_dict.get('length', 14)
-            df.ta.rsi(length=length, close=df[price_source_col], append=True) # Appends as RSI_length
-            rsi_col_name = f'RSI_{length}'
-            if rsi_col_name not in df.columns or pd.isna(df[rsi_col_name].iloc[-1]):
-                return {"error": f"Could not calculate {indicator_name} for {symbol}. Check data or parameters (length: {length}). Latest value is NaN."}
-            latest_indicator_output["value"] = round(df[rsi_col_name].iloc[-1], 4)
-
-        elif indicator_name in ["SMA", "EMA"]:
-            length = indicator_params_dict.get('length', 20)
-            if indicator_name == "SMA":
-                df.ta.sma(length=length, close=df[price_source_col], append=True) # Appends as SMA_length
-                col_name = f'SMA_{length}'
-            else: # EMA
-                df.ta.ema(length=length, close=df[price_source_col], append=True) # Appends as EMA_length
-                col_name = f'EMA_{length}'
-            if col_name not in df.columns or pd.isna(df[col_name].iloc[-1]):
-                return {"error": f"Could not calculate {indicator_name} for {symbol}. Check data or parameters (length: {length}). Latest value is NaN."}
-            latest_indicator_output["value"] = round(df[col_name].iloc[-1], 4)
-
-        elif indicator_name == "MACD":
-            fast = indicator_params_dict.get('fast', 12)
-            slow = indicator_params_dict.get('slow', 26)
-            signal_p = indicator_params_dict.get('signal', 9) # Renamed to avoid conflict with signal module
-            # pandas-ta appends columns like MACD_fast_slow_signal, MACDh_fast_slow_signal, MACDs_fast_slow_signal
-            df.ta.macd(fast=fast, slow=slow, signal=signal_p, close=df[price_source_col], append=True)
-            macd_line_col = f'MACD_{fast}_{slow}_{signal_p}'
-            signal_line_col = f'MACDs_{fast}_{slow}_{signal_p}'
-            hist_col = f'MACDh_{fast}_{slow}_{signal_p}'
+            length = parsed_params.get('length', 14)
+            actual_params_used['length'] = length
             
-            if not all(col in df.columns for col in [macd_line_col, signal_line_col, hist_col]) or \
-               pd.isna(df[macd_line_col].iloc[-1]) or \
-               pd.isna(df[signal_line_col].iloc[-1]) or \
-               pd.isna(df[hist_col].iloc[-1]):
-                return {"error": f"Could not calculate {indicator_name} components for {symbol}. Check data or parameters. One or more latest values are NaN."}
-            latest_indicator_output["values"] = {
-                "macd": round(df[macd_line_col].iloc[-1], 4),
-                "signal": round(df[signal_line_col].iloc[-1], 4),
-                "histogram": round(df[hist_col].iloc[-1], 4)
-            }
-
+            result, error = calculate_rsi_indicator(df, parsed_params, requested_final_length, price_source_col)
+            if error:
+                return {"error": error}
+                
+            indicator_output["data"] = format_series_to_list(result, "value")
+            
+        elif indicator_name == "SMA":
+            length = parsed_params.get('length', 20)
+            actual_params_used['length'] = length
+            
+            result, error = calculate_sma_indicator(df, parsed_params, requested_final_length, price_source_col)
+            if error:
+                return {"error": error}
+                
+            indicator_output["data"] = format_series_to_list(result, "value")
+            
+        elif indicator_name == "EMA":
+            length = parsed_params.get('length', 20)
+            actual_params_used['length'] = length
+            
+            result, error = calculate_ema_indicator(df, parsed_params, requested_final_length, price_source_col)
+            if error:
+                return {"error": error}
+                
+            indicator_output["data"] = format_series_to_list(result, "value")
+            
+        elif indicator_name == "MACD":
+            fast_length = parsed_params.get('fast', 12)
+            slow_length = parsed_params.get('slow', 26)
+            signal_length = parsed_params.get('signal', 9)
+            actual_params_used.update({'fast': fast_length, 'slow': slow_length, 'signal': signal_length})
+            
+            result, error = calculate_macd_indicator(df, parsed_params, requested_final_length, price_source_col)
+            if error:
+                return {"error": error}
+                
+            macd_series, signal_series, hist_series = result
+            indicator_output["data"] = format_macd_to_list(macd_series, signal_series, hist_series)
+            
         elif indicator_name == "BBANDS":
-            length = indicator_params_dict.get('length', 20)
-            std = indicator_params_dict.get('std', 2.0) # Ensure std is float for pandas-ta naming
-            # pandas-ta appends BBL_length_std, BBM_length_std, BBU_length_std, BBB_length_std, BBP_length_std
-            df.ta.bbands(length=length, std=std, close=df[price_source_col], append=True)
-            # Ensure stddev in column name matches pandas-ta (e.g., 2.0 not 2)
-            std_str = f"{std:.1f}" 
-            lower_col = f'BBL_{length}_{std_str}'
-            middle_col = f'BBM_{length}_{std_str}'
-            upper_col = f'BBU_{length}_{std_str}'
-
-            if not all(col in df.columns for col in [lower_col, middle_col, upper_col]) or \
-               pd.isna(df[lower_col].iloc[-1]) or \
-               pd.isna(df[middle_col].iloc[-1]) or \
-               pd.isna(df[upper_col].iloc[-1]):
-                return {"error": f"Could not calculate {indicator_name} components for {symbol}. Check data or parameters. One or more latest values are NaN."}
-            latest_indicator_output["values"] = {
-                "lower": round(df[lower_col].iloc[-1], 4),
-                "middle": round(df[middle_col].iloc[-1], 4),
-                "upper": round(df[upper_col].iloc[-1], 4)
-            }
+            length = parsed_params.get('length', 20)
+            std_dev = parsed_params.get('std', 2.0)
+            actual_params_used.update({'length': length, 'std': std_dev})
+            
+            result, error = calculate_bbands_indicator(df, parsed_params, requested_final_length, price_source_col)
+            if error:
+                return {"error": error}
+                
+            lower_band, middle_band, upper_band = result
+            indicator_output["data"] = format_bbands_to_list(lower_band, middle_band, upper_band)
+            
         else:
-            # This case should ideally not be reached if Literal for indicator_name is exhaustive
-            return {"error": f"Indicator '{indicator_name}' is not supported by this tool implementation."}
-
-        return latest_indicator_output
-
-    except KeyError as ke:
-        return {"error": f"Pandas-ta column naming issue or missing expected column for {indicator_name}: {str(ke)}. Ensure OHLCV data has correct columns (open, high, low, close, volume)."}
+            return {"error": f"지표 '{indicator_name}'는 현재 지원되지 않습니다."}
+            
+        # 데이터가 비어있을 경우 빈 리스트 반환
+        if indicator_output["data"] is None:
+            indicator_output["data"] = []
+            
+        return indicator_output
+        
     except Exception as e:
-        return {"error": f"Error during {indicator_name} calculation for {symbol}: {str(e)}"}
+        # 서버 로그에 자세한 오류 기록
+        print(f"calculate_technical_indicator_tool에서 예상치 못한 오류 발생 - {indicator_name}/{symbol}: {e}")
+        return {"error": f"{symbol}에 대한 {indicator_name} 계산 중 오류가 발생했습니다."}
 
 # --- Main execution (for running the server) ---
 if __name__ == "__main__":
     print("Starting CCXT MCP Server (Async with Annotated Params and Tool Metadata)...")
-    mcp.run()
+    mcp.run(transport="stdio")
