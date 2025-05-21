@@ -34,6 +34,7 @@ mcp = FastMCP("CCXT MCP Server 🚀")
 
 import pandas as pd
 from typing import Dict, Optional, Tuple
+import numpy as np
 
 def compute_rsi(df: pd.DataFrame, length: int = 14, price_source: str = 'close') -> Optional[pd.Series]:
     """Calculates Relative Strength Index (RSI) using pandas.
@@ -192,7 +193,165 @@ def compute_bbands(
         return lower_band, middle_band, upper_band
     except Exception as e:
         print(f"Error calculating BBANDS: {e}")
-        return None 
+        return None
+
+def compute_stochastic_oscillator(
+    df: pd.DataFrame, 
+    k_period: int = 14, 
+    d_period: int = 3, 
+    smooth_k: int = 3, 
+    price_source_high: str = 'high', 
+    price_source_low: str = 'low', 
+    price_source_close: str = 'close'
+) -> Optional[Tuple[pd.Series, pd.Series]]:
+    """
+    Calculates the Stochastic Oscillator (%K and %D).
+
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        k_period: The look-back period for the K calculation.
+        d_period: The period for the D line (SMA of %K).
+        smooth_k: The smoothing period for %K (SMA of raw %K).
+        price_source_high: DataFrame column for high prices.
+        price_source_low: DataFrame column for low prices.
+        price_source_close: DataFrame column for close prices.
+
+    Returns:
+        A tuple of (percent_k, percent_d) pandas Series, or None if calculation fails.
+    """
+    if df.empty:
+        # print("Warning: DataFrame is empty for Stochastic Oscillator calculation.")
+        return None
+
+    required_cols = [price_source_high, price_source_low, price_source_close]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Price source column '{col}' not found in DataFrame.")
+        if df[col].isnull().all():
+            # print(f"Warning: Price source column '{col}' for Stochastic Oscillator is all NaN.")
+            return None
+            
+    try:
+        lowest_low = df[price_source_low].rolling(window=k_period, min_periods=k_period).min()
+        highest_high = df[price_source_high].rolling(window=k_period, min_periods=k_period).max()
+
+        delta_high_low = highest_high - lowest_low
+        
+        # Calculate raw %K
+        # Set to 50 if delta_high_low is 0 (flat price in k_period)
+        # otherwise calculate 100 * ((close - lowest_low) / delta_high_low)
+        raw_k_values = np.where(
+            delta_high_low == 0, 
+            50.0,  # Set to 50 if no range (highest_high == lowest_low)
+            100 * ((df[price_source_close] - lowest_low) / delta_high_low)
+        )
+        raw_k = pd.Series(raw_k_values, index=df.index)
+        
+        # Handle cases where raw_k might still be NaN due to NaNs in input even if delta_high_low is not 0
+        # For example, if close, lowest_low, or highest_high had NaNs not caught by min_periods.
+        # Or if (close - lowest_low) is NaN / non-zero_delta is NaN.
+        # A common practice is to fill these with a mid-value or propagate.
+        # Given the np.where, the main source of NaNs would be if inputs to np.where are NaN.
+        # Rolling functions with min_periods handle initial NaNs.
+        # If raw_k has NaNs after np.where, it means some input to the calculation was NaN.
+        # We can fill these with 50, or propagate. Propagating is often safer.
+        # However, the problem description implies filling NaNs from 0/0 with 50.
+        # The `np.where(delta_high_low == 0, 50.0, ...)` handles the 0/0 case explicitly.
+        # NaNs resulting from other operations (e.g. NaN in close) should ideally propagate.
+
+        if smooth_k > 1:
+            percent_k = raw_k.rolling(window=smooth_k, min_periods=smooth_k).mean()
+        else:
+            percent_k = raw_k
+
+        percent_d = percent_k.rolling(window=d_period, min_periods=d_period).mean()
+        
+        # Ensure no leading NaNs beyond what's necessary due to rolling windows
+        # This is generally handled by the rolling(min_periods=...)
+        # and how process_indicator_series (if used externally) would pick first_valid_index.
+
+        return percent_k, percent_d
+
+    except Exception as e:
+        print(f"Error calculating Stochastic Oscillator: {e}")
+        return None
+
+def compute_atr(
+    df: pd.DataFrame, 
+    period: int = 14, 
+    price_source_high: str = 'high', 
+    price_source_low: str = 'low', 
+    price_source_close: str = 'close'
+) -> Optional[pd.Series]:
+    """
+    Calculates the Average True Range (ATR).
+
+    Args:
+        df: Pandas DataFrame with OHLCV data, indexed by timestamp.
+        period: The look-back period for ATR calculation.
+        price_source_high: DataFrame column for high prices.
+        price_source_low: DataFrame column for low prices.
+        price_source_close: DataFrame column for close prices.
+
+    Returns:
+        A pandas Series with ATR values, or None if calculation fails.
+    """
+    if df.empty or len(df) < 1: # Check for empty or too short DataFrame
+        # print("Warning: DataFrame is empty or too short for ATR calculation.")
+        return None
+
+    required_cols = [price_source_high, price_source_low, price_source_close]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Price source column '{col}' not found in DataFrame.")
+        if df[col].isnull().all():
+            # print(f"Warning: Price source column '{col}' for ATR is all NaN.")
+            return None
+            
+    # Check if there's enough data for at least one ATR value after considering the period
+    # While ewm with min_periods handles this by returning NaNs, 
+    # an explicit check for len(df) < period could be done here if strictness is desired.
+    # However, typically, if len(df) is 1, TR can be H-L, but ATR would be NaN until `period` TR values exist.
+    # The current logic with min_periods=period in ewm is standard.
+    
+    try:
+        high_col = df[price_source_high]
+        low_col = df[price_source_low]
+        close_col = df[price_source_close]
+
+        high_low = high_col - low_col
+        high_prev_close = (high_col - close_col.shift(1)).abs()
+        low_prev_close = (low_col - close_col.shift(1)).abs()
+
+        # Create a DataFrame for TR components
+        # Ensure index alignment, especially if inputs had different NaNs initially
+        tr_components = [high_low, high_prev_close, low_prev_close]
+        # Filter out series that are all NaN before concat, to avoid issues if a price source was valid but led to all NaN here
+        tr_components_filtered = [s for s in tr_components if not s.isnull().all()]
+        
+        if not tr_components_filtered: # Should not happen if input column checks passed
+            return None
+
+        tr_df = pd.concat(tr_components_filtered, axis=1)
+        true_range = tr_df.max(axis=1, skipna=False) # skipna=False to ensure NaNs propagate if all components are NaN for a row
+
+        # Handle the first TR value: TR1 = High1 - Low1
+        # .iat requires integer index, ensure df is not empty (already checked)
+        if len(df) > 0: # Redundant due to earlier check, but safe
+             true_range.iat[0] = high_col.iat[0] - low_col.iat[0]
+        
+        # Calculate ATR using Wilder's Smoothing (approximated by EWM with adjust=False)
+        # min_periods=period ensures that ATR is NaN until there are `period` TR values.
+        # The first ATR value will be the SMA of the first `period` TR values.
+        # Subsequent values use the EMA formula.
+        # Pandas ewm with adjust=False and alpha = 1/N directly implements Wilder's smoothing.
+        atr = true_range.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+        
+        return atr
+
+    except Exception as e:
+        print(f"Error calculating ATR: {e}")
+        return None
 
 # --- Helper Function to Initialize CCXT Exchange ---
 async def get_exchange_instance(
@@ -1262,6 +1421,25 @@ def timestamp_to_iso(timestamp):
     # 밀리초를 제외한 ISO 형식 문자열 변환
     return timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
 
+def format_stochastic_to_list(percent_k, percent_d):
+    """Stochastic Oscillator 시리즈를 리스트로 변환하는 함수"""
+    if percent_k is None or percent_d is None:
+        return []
+    
+    results = []
+    # Ensure both series are aligned and iterate through common indices
+    common_index = percent_k.index.intersection(percent_d.index)
+    
+    for idx in common_index:
+        k_val = percent_k.get(idx)
+        d_val = percent_d.get(idx)
+        results.append({
+            "datetime": timestamp_to_iso(idx),
+            "percent_k": round(k_val, 4) if pd.notnull(k_val) else None,
+            "percent_d": round(d_val, 4) if pd.notnull(d_val) else None,
+        })
+    return results
+
 def format_series_to_list(series, name):
     """단일 시리즈를 리스트로 변환하는 함수"""
     if series is None or series.empty:
@@ -1400,22 +1578,81 @@ def calculate_bbands_indicator(df, params, limit, price_source):
     except Exception as e:
         return None, f"볼린저밴드 계산 중 오류 발생: {str(e)}"
 
+def calculate_stochastic_indicator(df, params, limit, price_source_high, price_source_low, price_source_close):
+    """Stochastic Oscillator 지표를 계산하는 함수"""
+    k_period = params.get('k_period', 14)
+    d_period = params.get('d_period', 3)
+    smooth_k = params.get('smooth_k', 3)
+    
+    try:
+        stoch_result = compute_stochastic_oscillator(
+            df,
+            k_period=k_period,
+            d_period=d_period,
+            smooth_k=smooth_k,
+            price_source_high=price_source_high,
+            price_source_low=price_source_low,
+            price_source_close=price_source_close
+        )
+        
+        if stoch_result is None:
+            return None, f"Stochastic Oscillator 계산 결과가 비어 있습니다."
+            
+        percent_k, percent_d = stoch_result
+        
+        processed_k = process_indicator_series(percent_k, limit)
+        processed_d = process_indicator_series(percent_d, limit)
+        
+        return (processed_k, processed_d), None
+    except Exception as e:
+        return None, f"Stochastic Oscillator 계산 중 오류 발생: {str(e)}"
+
+def calculate_atr_indicator(df, params, limit, price_source_high, price_source_low, price_source_close):
+    """ATR 지표를 계산하는 함수"""
+    period = params.get('period', 14)
+    
+    try:
+        calculated_indicator = compute_atr(
+            df, 
+            period=period, 
+            price_source_high=price_source_high,
+            price_source_low=price_source_low,
+            price_source_close=price_source_close
+        )
+        if calculated_indicator is None or calculated_indicator.empty:
+            return None, f"ATR 계산 결과가 비어 있습니다. (period: {period})"
+            
+        processed_series = process_indicator_series(calculated_indicator, limit)
+        return processed_series, None
+    except Exception as e:
+        return None, f"ATR 계산 중 오류 발생: {str(e)}"
+
 @mcp.tool(
     name="calculate_technical_indicator",
     description="Fetches OHLCV data for a given symbol and timeframe, then calculates a specified technical indicator "
-                "(e.g., RSI, SMA, EMA, MACD, Bollinger Bands). Returns a time series of calculated indicator values. "
+                "(e.g., RSI, SMA, EMA, MACD, Bollinger Bands, Stochastic Oscillator, ATR). Returns a time series of calculated indicator values. "
                 "The number of data points returned corresponds to the OHLCV data fetched (controlled by 'ohlcv_limit' in indicator_params).",
-    tags={"market_data", "technical_analysis", "indicator", "charting", "RSI", "SMA", "EMA", "MACD", "BBANDS"}
+    tags={"market_data", "technical_analysis", "indicator", "charting", "RSI", "SMA", "EMA", "MACD", "BBANDS", "STOCH", "ATR"}
 )
 async def calculate_technical_indicator_tool(
     exchange_id: Annotated[str, Field(description="The ID of the exchange (e.g., 'binance', 'upbit'). Case-insensitive.")],
     symbol: Annotated[str, Field(description="The trading symbol to calculate the indicator for (e.g., 'BTC/USDT', 'ETH/KRW').")],
     timeframe: Annotated[TimeframeLiteral, Field(description="The candle timeframe for OHLCV data. Common supported values are provided. Always check the specific exchange's documentation for their full list of supported timeframes as it can vary.")],
-    indicator_name: Annotated[Literal["RSI", "SMA", "EMA", "MACD", "BBANDS"], 
-                            Field(description="The name of the technical indicator to calculate. Supported: RSI, SMA, EMA, MACD, BBANDS.")],
+    indicator_name: Annotated[Literal["RSI", "SMA", "EMA", "MACD", "BBANDS", "STOCH", "ATR"], 
+                            Field(description="The name of the technical indicator to calculate. Supported: RSI, SMA, EMA, MACD, BBANDS, STOCH, ATR.")],
     ohlcv_limit: Annotated[Optional[int], Field(description="Optional: The number of OHLCV data points to fetch. Default is 50. Check exchange for default and maximum limits.", gt=0)] = None,
     indicator_params: Annotated[Optional[str], Field(
-        description='''Optional: A JSON string representing a dictionary of parameters for the chosen indicator. All parameters within the dictionary are optional and have defaults. Example JSON string for RSI: {"length": 14, "price_source": "close"}. Parameter details for the dictionary: For RSI: {'length': 14, 'price_source': 'close'}. For SMA/EMA: {'length': 20, 'price_source': 'close'}. For MACD: {'fast': 12, 'slow': 26, 'signal': 9, 'price_source': 'close'}. For BBANDS (Bollinger Bands): {'length': 20, 'std': 2.0, 'price_source': 'close'}. Valid 'price_source' values: 'open', 'high', 'low', 'close' (default), 'hlc3', 'ohlc4'. Ensure the JSON string is correctly formatted.'''
+        description='''Optional: A JSON string representing a dictionary of parameters for the chosen indicator. All parameters within the dictionary are optional and have defaults.
+        Example JSON string for RSI: {"length": 14, "price_source": "close"}.
+        Parameter details for the dictionary:
+        For RSI: {'length': 14, 'price_source': 'close'}.
+        For SMA/EMA: {'length': 20, 'price_source': 'close'}.
+        For MACD: {'fast': 12, 'slow': 26, 'signal': 9, 'price_source': 'close'}.
+        For BBANDS (Bollinger Bands): {'length': 20, 'std': 2.0, 'price_source': 'close'}.
+        For STOCH (Stochastic Oscillator): {'k_period': 14, 'd_period': 3, 'smooth_k': 3, 'price_source_high': 'high', 'price_source_low': 'low', 'price_source_close': 'close'}.
+        For ATR (Average True Range): {'period': 14, 'price_source_high': 'high', 'price_source_low': 'low', 'price_source_close': 'close'}.
+        Valid 'price_source' values for single-price indicators: 'open', 'high', 'low', 'close' (default), 'hlc3', 'ohlc4'.
+        Ensure the JSON string is correctly formatted.'''
     )] = None,
     api_key: Annotated[Optional[str], Field(description="Optional: Your API key for the exchange. If not provided, the system may use pre-configured credentials or proceed unauthenticated. If authentication is used (with directly provided or pre-configured keys), it may offer benefits like enhanced access or higher rate limits.")] = None,
     secret_key: Annotated[Optional[str], Field(description="Optional: Your secret key for the exchange. Used with an API key if authentication is performed (whether keys are provided directly or pre-configured).")] = None,
@@ -1436,12 +1673,24 @@ async def calculate_technical_indicator_tool(
     # 실제 OHLCV 데이터 가져올 길이 (계산용 버퍼 추가)
     ohlcv_fetch_limit = requested_final_length + 100
     
-    # 가격 소스 컬럼 결정
-    price_source_col = parsed_params.get('price_source', 'close').lower()
-    valid_price_sources = ['open', 'high', 'low', 'close', 'hlc3', 'ohlc4']
-    if price_source_col not in valid_price_sources:
-        return {"error": f"잘못된 'price_source': {price_source_col}. 다음 중 하나여야 합니다: {valid_price_sources}."}
-    
+    # 가격 소스 컬럼 결정 (STOCH는 별도 처리)
+    price_source_col = None
+    price_source_high_col = None
+    price_source_low_col = None
+    price_source_close_col = None
+
+    multi_source_indicators = ["STOCH", "ATR"]
+    if indicator_name not in multi_source_indicators:
+        price_source_col = parsed_params.get('price_source', 'close').lower()
+        valid_price_sources = ['open', 'high', 'low', 'close', 'hlc3', 'ohlc4']
+        if price_source_col not in valid_price_sources:
+            return {"error": f"잘못된 'price_source': {price_source_col}. 다음 중 하나여야 합니다: {valid_price_sources}."}
+    else: # STOCH and ATR use specific high, low, close sources
+        price_source_high_col = parsed_params.get('price_source_high', 'high').lower()
+        price_source_low_col = parsed_params.get('price_source_low', 'low').lower()
+        price_source_close_col = parsed_params.get('price_source_close', 'close').lower()
+        # Validation for these columns will happen in prepare_dataframe or the specific compute function.
+
     # 2. OHLCV 데이터 가져오기
     ohlcv_data, fetch_error = await fetch_ohlcv_data(
         exchange_id, symbol, timeframe, ohlcv_fetch_limit, 
@@ -1452,22 +1701,42 @@ async def calculate_technical_indicator_tool(
         return {"error": fetch_error}
     
     # 3. 데이터프레임 준비
-    df, df_error = prepare_dataframe(ohlcv_data, price_source_col)
+    # For STOCH or ATR, price_source_col is not used directly by prepare_dataframe for selecting the final calculation column,
+    # but it needs one of the price columns (e.g., 'close') to check for all NaNs initially during dataframe preparation.
+    initial_check_price_source = price_source_close_col if indicator_name in multi_source_indicators else price_source_col
+    df, df_error = prepare_dataframe(ohlcv_data, initial_check_price_source)
     if df_error:
         return {"error": df_error}
     
     # 4. 실제 파라미터 사용값 기록 (결과에 포함시키기 위함)
     actual_params_used = parsed_params.copy()
     actual_params_used['ohlcv_limit'] = requested_final_length
-    actual_params_used['price_source'] = price_source_col
     
+    price_source_display = {}
+    if indicator_name in multi_source_indicators:
+        price_source_display = {
+            'high': price_source_high_col,
+            'low': price_source_low_col,
+            'close': price_source_close_col
+        }
+        actual_params_used.update({
+            'price_source_high': price_source_high_col,
+            'price_source_low': price_source_low_col,
+            'price_source_close': price_source_close_col
+        })
+        # Remove single 'price_source' if it was in parsed_params for multi-source indicators, as it's not used.
+        actual_params_used.pop('price_source', None)
+    else:
+        price_source_display = price_source_col
+        actual_params_used['price_source'] = price_source_col
+
     # 5. 지표 계산 및 결과 생성
     indicator_output = {
         "indicator_name": indicator_name,
         "symbol": symbol,
         "timeframe": timeframe,
         "params_used": actual_params_used,
-        "price_source_used": price_source_col,
+        "price_source_used": price_source_display,
         "data": []
     }
     
@@ -1479,7 +1748,6 @@ async def calculate_technical_indicator_tool(
             result, error = calculate_rsi_indicator(df, parsed_params, requested_final_length, price_source_col)
             if error:
                 return {"error": error}
-                
             indicator_output["data"] = format_series_to_list(result, "value")
             
         elif indicator_name == "SMA":
@@ -1489,7 +1757,6 @@ async def calculate_technical_indicator_tool(
             result, error = calculate_sma_indicator(df, parsed_params, requested_final_length, price_source_col)
             if error:
                 return {"error": error}
-                
             indicator_output["data"] = format_series_to_list(result, "value")
             
         elif indicator_name == "EMA":
@@ -1499,7 +1766,6 @@ async def calculate_technical_indicator_tool(
             result, error = calculate_ema_indicator(df, parsed_params, requested_final_length, price_source_col)
             if error:
                 return {"error": error}
-                
             indicator_output["data"] = format_series_to_list(result, "value")
             
         elif indicator_name == "MACD":
@@ -1511,7 +1777,6 @@ async def calculate_technical_indicator_tool(
             result, error = calculate_macd_indicator(df, parsed_params, requested_final_length, price_source_col)
             if error:
                 return {"error": error}
-                
             macd_series, signal_series, hist_series = result
             indicator_output["data"] = format_macd_to_list(macd_series, signal_series, hist_series)
             
@@ -1523,9 +1788,35 @@ async def calculate_technical_indicator_tool(
             result, error = calculate_bbands_indicator(df, parsed_params, requested_final_length, price_source_col)
             if error:
                 return {"error": error}
-                
             lower_band, middle_band, upper_band = result
             indicator_output["data"] = format_bbands_to_list(lower_band, middle_band, upper_band)
+
+        elif indicator_name == "STOCH":
+            k_period = parsed_params.get('k_period', 14)
+            d_period = parsed_params.get('d_period', 3)
+            smooth_k = parsed_params.get('smooth_k', 3)
+            actual_params_used.update({'k_period': k_period, 'd_period': d_period, 'smooth_k': smooth_k})
+
+            result, error = calculate_stochastic_indicator(
+                df, parsed_params, requested_final_length, 
+                price_source_high_col, price_source_low_col, price_source_close_col
+            )
+            if error:
+                return {"error": error}
+            percent_k, percent_d = result
+            indicator_output["data"] = format_stochastic_to_list(percent_k, percent_d)
+
+        elif indicator_name == "ATR":
+            period = parsed_params.get('period', 14)
+            actual_params_used['period'] = period
+
+            result, error = calculate_atr_indicator(
+                df, parsed_params, requested_final_length,
+                price_source_high_col, price_source_low_col, price_source_close_col
+            )
+            if error:
+                return {"error": error}
+            indicator_output["data"] = format_series_to_list(result, "value") # ATR is a single series
             
         else:
             return {"error": f"지표 '{indicator_name}'는 현재 지원되지 않습니다."}

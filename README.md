@@ -131,6 +131,7 @@ This server exposes the following tools, categorized by whether they require API
 *   **`fetch_option_contract_data`**: Fetches market data for an options contract.
 *   **`fetch_market_ticker`**: Fetches the latest price ticker data for a symbol.
 *   **`fetch_public_market_trades`**: Fetches recent public trades for a symbol.
+*   **`calculate_technical_indicator_tool`**: Fetches OHLCV data and calculates a specified technical indicator (e.g., RSI, SMA, EMA, MACD, Bollinger Bands, Stochastic Oscillator, Average True Range (ATR)).
 
 Each tool has detailed parameter descriptions available via the MCP protocol itself, thanks to the use of `Annotated` and `pydantic.Field`.
 
