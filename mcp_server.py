@@ -1835,4 +1835,6 @@ async def calculate_technical_indicator_tool(
 # --- Main execution (for running the server) ---
 if __name__ == "__main__":
     print("Starting CCXT MCP Server (Async with Annotated Params and Tool Metadata)...")
-    mcp.run(transport="stdio")
+    mcp.run(transport="streamable-http",
+            host="0.0.0.0",
+            port=8000)

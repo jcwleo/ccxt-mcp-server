@@ -69,38 +69,13 @@ Create a `claude_desktop_config.json` file (or the equivalent for your MCP clien
 ```json
 {
   "mcpServers": {
-        "ccxt-mcp-server": {
-            "command": "uv",
-            "args": [
-              "--directory",
-              "/path/to/your/ccxt-mcp-server",
-              "run",
-              "mcp_server.py"
-            ]
-        }
+    "ccxt-mcp-server": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://127.0.0.1:8000/mcp"]
     }
+  }
 }
 ```
-
-**Important:**
-
-*   Replace `"/path/to/your/ccxt-mcp-server"` with the **actual absolute path** to the directory where you cloned or downloaded this `ccxt-mcp-server` project (i.e., the directory containing `mcp_server.py`).
-*   The `"command"` and `"args"` will depend on how you run Python projects and if you are using `uv` or a virtual environment. The example above uses `uv`.
-    *   If you are using a virtual environment directly with `python`, the command might look like:
-        ```json
-        {
-          "mcpServers": {
-                "ccxt-mcp-server": {
-                    "command": "/path/to/your/.venv/bin/python", // Or `python.exe` on Windows
-                    "args": [
-                      "mcp_server.py"
-                    ],
-                    "workingDirectory": "/path/to/your/ccxt-mcp-server"
-                }
-            }
-        }
-        ```
-        Ensure the `command` points to the Python executable within your virtual environment and `workingDirectory` is set to the project's root.
 
 This configuration tells your MCP client how to start and communicate with the CCXT MCP server.
 
