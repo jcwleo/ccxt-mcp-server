@@ -17,6 +17,16 @@ This server is built using [FastMCP](https://gofastmcp.com/), which simplifies t
 
 ## Installation
 
+### Installing via Smithery
+
+To install CCXT Cryptocurrency Exchange Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@jcwleo/ccxt-mcp-server):
+
+```bash
+npx -y @smithery/cli install @jcwleo/ccxt-mcp-server --client claude
+```
+
+### Manual Installation
+
 1.  **Clone the repository (if you haven't already):**
     ```bash
     git clone https://github.com/jcwleo/ccxt-mcp-server.git
