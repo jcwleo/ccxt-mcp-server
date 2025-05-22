@@ -71,7 +71,7 @@ Create a `claude_desktop_config.json` file (or the equivalent for your MCP clien
   "mcpServers": {
     "ccxt-mcp-server": {
       "command": "npx",
-      "args": ["mcp-remote", "http://127.0.0.1:8000/mcp"]
+      "args": ["mcp-remote", "http://127.0.0.1:8000/mcp/"]
     }
   }
 }
