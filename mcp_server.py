@@ -32,6 +32,8 @@ TimeframeLiteral = Literal[
 # Initialize FastMCP
 mcp = FastMCP("CCXT MCP Server 🚀")
 
+app = mcp.streamable_http_app()
+
 import pandas as pd
 from typing import Dict, Optional, Tuple
 import numpy as np
@@ -1835,6 +1837,4 @@ async def calculate_technical_indicator_tool(
 # --- Main execution (for running the server) ---
 if __name__ == "__main__":
     print("Starting CCXT MCP Server (Async with Annotated Params and Tool Metadata)...")
-    mcp.run(transport="streamable-http",
-            host="0.0.0.0",
-            port=8000)
+    mcp.run()
